@@ -1,0 +1,32 @@
+{
+  "name": "@vicstack/permissions",
+  "version": "0.1.0",
+  "description": "Type-safe, role-based permission checking generated from your own User/Roles/Actions/Resources types.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "test": "bun test",
+    "prepublishOnly": "bun run test && bun run build"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^7"
+  }
+}
