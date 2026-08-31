@@ -140,3 +140,43 @@ describe("createCan async checks", () => {
     await expect(asyncCan(regularUser, "post:update", post("someone-else"))).resolves.toBe(false);
   });
 });
+
+describe("createCan role-level boolean shortcut", () => {
+  const boolPermissions = {
+    post: {
+      admin: true,
+      moderator: {
+        create: true,
+        read: true,
+        update: (user, post) => user.id === post.authorID,
+        delete: true,
+      },
+      user: false,
+    },
+  } satisfies Permissions;
+
+  const boolCan = createCan<User, typeof roles, typeof actions, Resources, typeof boolPermissions>(
+    boolPermissions
+  );
+
+  test("role-level `true` grants every action, no resource ever required", () => {
+    expect(boolCan(admin, "post:create")).toBe(true);
+    expect(boolCan(admin, "post:read")).toBe(true);
+    expect(boolCan(admin, "post:update")).toBe(true);
+    expect(boolCan(admin, "post:delete")).toBe(true);
+  });
+
+  test("role-level `false` denies every action, no resource ever required", () => {
+    expect(boolCan(regularUser, "post:create")).toBe(false);
+    expect(boolCan(regularUser, "post:read")).toBe(false);
+    expect(boolCan(regularUser, "post:update")).toBe(false);
+    expect(boolCan(regularUser, "post:delete")).toBe(false);
+  });
+
+  test("mixed table: a sibling role for the same resource keeps its granular per-action checks", () => {
+    expect(boolCan(moderator, "post:create")).toBe(true);
+    expect(boolCan(moderator, "post:update", post(moderator.id))).toBe(true);
+    expect(boolCan(moderator, "post:update", post("someone-else"))).toBe(false);
+    expect(boolCan(moderator, "post:delete")).toBe(true);
+  });
+});

@@ -13,9 +13,13 @@ Ordered by priority — highest-impact/most-foundational first. Each item includ
       role repeats its full grant list (`admin` spells out `create/read/update/delete: true` even
       though it's "obviously" a superset). Needs either `roles: Role[]` on `User`, or a way to say
       "role A inherits role B's grants plus these."
-- [ ] **Wildcard / default fallback.** No way to say "allow everything except X" — every cell in the
-      table must be filled in explicitly. A default value (or `"*"` action) would cut a lot of
-      boilerplate, especially once hierarchy exists.
+- [x] **Wildcard / default fallback (whole-role shortcut only).** Every cell in the table had to be
+      filled in explicitly, including roles that grant (or deny) every action identically. A
+      role's entry can now be a plain `boolean` instead of the full per-action object, short-
+      circuiting every action for that role/resource with no resource argument ever required.
+      This only covers the "same value for every action" case — there's still no way to say
+      "allow everything except X" (a partial wildcard with explicit per-action exceptions);
+      that remains unsolved and would need a separate mechanism (e.g. a `"*"` action key).
 
 ## Medium priority
 

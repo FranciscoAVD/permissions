@@ -24,7 +24,7 @@ type Permissions = PermissionsGenerator<User, typeof roles, typeof actions, Reso
 
 const permissions = {
   post: {
-    admin: { create: true, read: true, update: true, delete: true },
+    admin: true, // shorthand: every action granted, no resource ever required
     moderator: {
       create: true,
       read: true,
@@ -57,6 +57,8 @@ can(user, "post:update", othersPost);   // false — user.id doesn't match other
 ```
 
 If **any** role's check for a given resource/action needs the resource argument, `can` requires it for every call to that action, unless the caller's `user` carries a literal `role` — in which case the requirement narrows to what that specific role's implementation actually needs.
+
+A role's entry can also be a plain `boolean` instead of the per-action object — `admin: true` grants every action for that resource with no resource argument ever required, and `admin: false` denies every action the same way. Every role still has to be listed explicitly; nothing is ever allowed or denied by omission.
 
 ## Develop
 

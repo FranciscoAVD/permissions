@@ -12,7 +12,7 @@ export type PermissionsGenerator<
   Resources extends Record<string, any>,
 > = {
     [R in keyof Resources]: {
-      [UR in Roles[number]]: ({
+      [UR in Roles[number]]: boolean | ({
         [A in Actions[number]]: ((user: User & { role: UR }, resource: Resources[R]) => boolean | Promise<boolean>) | boolean;
       });
     }
@@ -36,6 +36,12 @@ export function createCan<
   // true if this specific check value's function returns a Promise
   type IsAsync<T> = T extends (...args: any[]) => infer Ret ? (Ret extends Promise<any> ? true : false) : false;
 
+  // resolves the actual check value for a role, unwrapping the role-level boolean
+  // shortcut. Entry must be a naked type parameter here (not `P[K][R]` inlined) for
+  // the conditional to narrow inside its own branches.
+  type CheckValue<Entry, A extends PropertyKey> =
+    Entry extends boolean ? Entry : A extends keyof Entry ? Entry[A] : never;
+
   return function can<
     K extends keyof Resources,
     A extends Actions[number],
@@ -43,18 +49,27 @@ export function createCan<
   >(
     user: User & { role: R },
     action: `${K & string}:${A}`,
-    ...args: ParamCount<P[K][R][A]> extends 2 ? [resource: Resources[K]] : [resource?: Resources[K]]
-  ): IsAsync<P[K][R][A]> extends true ? Promise<boolean> : boolean {
+    ...args: ParamCount<CheckValue<P[K][R], A>> extends 2 ? [resource: Resources[K]] : [resource?: Resources[K]]
+  ): IsAsync<CheckValue<P[K][R], A>> extends true ? Promise<boolean> : boolean {
     const [resource] = args as [Resources[K]?];
     const unformatted = action.split(":");
     const r = unformatted[0] as K;
     const a = unformatted[1] as A;
     const test = permissions[r][user.role];
 
-    const result = typeof test[a] === "function"
-      ? (test[a] as (user: User, resource?: Resources[K]) => boolean | Promise<boolean>)(user, resource)
-      : test[a];
+    if (typeof test === "boolean") {
+      return test as unknown as IsAsync<CheckValue<P[K][R], A>> extends true ? Promise<boolean> : boolean;
+    }
 
-    return result as IsAsync<P[K][R][A]> extends true ? Promise<boolean> : boolean;
+    // `test` is proven non-boolean by the guard above, but that's a runtime fact TS
+    // can't fold back into `P[K][R]` (a deferred generic indexed-access, not a
+    // concrete union) — so index through a plain, explicitly-indexable shape instead.
+    const checks = test as Record<A, boolean | ((user: User, resource?: Resources[K]) => boolean | Promise<boolean>)>;
+
+    const result = typeof checks[a] === "function"
+      ? (checks[a] as (user: User, resource?: Resources[K]) => boolean | Promise<boolean>)(user, resource)
+      : checks[a];
+
+    return result as IsAsync<CheckValue<P[K][R], A>> extends true ? Promise<boolean> : boolean;
   };
 }
