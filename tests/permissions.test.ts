@@ -97,3 +97,46 @@ describe("createCan", () => {
     expect(can(regularUser, "post:delete", post("someone-else"))).toBe(false);
   });
 });
+
+describe("createCan async checks", () => {
+  const asyncPermissions = {
+    post: {
+      admin: { create: true, read: true, update: true, delete: true },
+      moderator: {
+        create: true,
+        read: true,
+        update: async (user, post) => {
+          await Promise.resolve();
+          return user.id === post.authorID;
+        },
+        delete: true,
+      },
+      user: {
+        create: true,
+        read: true,
+        update: async (user, post) => {
+          await Promise.resolve();
+          return user.id === post.authorID;
+        },
+        delete: (user, post) => user.id === post.authorID,
+      },
+    },
+  } satisfies Permissions;
+
+  const asyncCan = createCan<
+    User,
+    typeof roles,
+    typeof actions,
+    Resources,
+    typeof asyncPermissions
+  >(asyncPermissions);
+
+  test("sync checks stay synchronous even in a table with async checks elsewhere", () => {
+    expect(asyncCan(admin, "post:create")).toBe(true);
+  });
+
+  test("async check resolves to the declared ownership result", async () => {
+    await expect(asyncCan(regularUser, "post:update", post(regularUser.id))).resolves.toBe(true);
+    await expect(asyncCan(regularUser, "post:update", post("someone-else"))).resolves.toBe(false);
+  });
+});

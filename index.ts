@@ -13,7 +13,7 @@ export type PermissionsGenerator<
 > = {
     [R in keyof Resources]: {
       [UR in Roles[number]]: ({
-        [A in Actions[number]]: ((user: User & { role: UR }, resource: Resources[R]) => boolean) | boolean;
+        [A in Actions[number]]: ((user: User & { role: UR }, resource: Resources[R]) => boolean | Promise<boolean>) | boolean;
       });
     }
   }
@@ -33,6 +33,9 @@ export function createCan<
   // number of declared params on a check value (booleans count as 0)
   type ParamCount<T> = T extends (...args: infer PA) => any ? PA["length"] : 0;
 
+  // true if this specific check value's function returns a Promise
+  type IsAsync<T> = T extends (...args: any[]) => infer Ret ? (Ret extends Promise<any> ? true : false) : false;
+
   return function can<
     K extends keyof Resources,
     A extends Actions[number],
@@ -41,15 +44,17 @@ export function createCan<
     user: User & { role: R },
     action: `${K & string}:${A}`,
     ...args: ParamCount<P[K][R][A]> extends 2 ? [resource: Resources[K]] : [resource?: Resources[K]]
-  ): boolean {
+  ): IsAsync<P[K][R][A]> extends true ? Promise<boolean> : boolean {
     const [resource] = args as [Resources[K]?];
     const unformatted = action.split(":");
     const r = unformatted[0] as K;
     const a = unformatted[1] as A;
     const test = permissions[r][user.role];
 
-    return typeof test[a] === "function"
-      ? (test[a] as (user: User, resource?: Resources[K]) => boolean)(user, resource)
+    const result = typeof test[a] === "function"
+      ? (test[a] as (user: User, resource?: Resources[K]) => boolean | Promise<boolean>)(user, resource)
       : test[a];
+
+    return result as IsAsync<P[K][R][A]> extends true ? Promise<boolean> : boolean;
   };
 }

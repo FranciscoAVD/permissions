@@ -4,9 +4,11 @@ Ordered by priority — highest-impact/most-foundational first. Each item includ
 
 ## High priority
 
-- [ ] **Async check functions.** `can()` is synchronous only. Most real checks need a DB lookup
-      (e.g. "is this user on the post's team"), so check functions need to be able to return
-      `Promise<boolean>` and `can()` needs an async variant. Blocks realistic adoption.
+- [x] **Async check functions.** `can()` was synchronous only. Most real checks need a DB lookup
+      (e.g. "is this user on the post's team"), so check functions can now return
+      `Promise<boolean>`. `can()`'s return type is derived per call from the actual check
+      function's return type (same trick as `RequiresResource`), so sync checks stay plain
+      `boolean` — only actions backed by an async check require `await`.
 - [ ] **Multiple roles per user / role hierarchy.** Currently one literal `role` per user, and every
       role repeats its full grant list (`admin` spells out `create/read/update/delete: true` even
       though it's "obviously" a superset). Needs either `roles: Role[]` on `User`, or a way to say
