@@ -24,24 +24,22 @@ type Resources = {
 type Permissions = PermissionsGenerator<User, typeof roles, typeof actions, Resources>;
 
 const permissions = {
-  post: {
-    admin: {
-      create: true,
-      read: true,
-      update: true,
-      delete: true,
-    },
-    moderator: {
-      create: true,
-      read: true,
-      update: (user, post) => user.id === post.authorID,
-      delete: true,
-    },
-    user: {
-      create: true,
-      read: true,
-      update: (user, post) => user.id === post.authorID,
-      delete: (user, post) => user.id === post.authorID,
+  admin: {
+    "post:create": true,
+    "post:read": true,
+    "post:update": true,
+    "post:delete": true,
+  },
+  moderator: {
+    "post:create": true,
+    "post:read": true,
+    "post:update": (user, post) => user.id === post.authorID,
+  },
+  user: {
+    "post:read": true,
+    "post:update": async (user, post) => {
+      await Promise.resolve();
+      return user.id === post.authorID;
     },
   },
 } satisfies Permissions;
@@ -64,18 +62,11 @@ const post = (authorID: string): Post => ({
 describe("createCan", () => {
   test("boolean permissions return the declared value, no resource needed", () => {
     expect(can(admin, "post:create")).toBe(true);
-    expect(can(moderator, "post:create")).toBe(true);
-    expect(can(regularUser, "post:create")).toBe(true);
-  });
-
-  test("read is allowed for every role", () => {
     expect(can(admin, "post:read")).toBe(true);
-    expect(can(moderator, "post:read")).toBe(true);
-    expect(can(regularUser, "post:read")).toBe(true);
-  });
-
-  test("admin can update without providing a resource", () => {
     expect(can(admin, "post:update")).toBe(true);
+    expect(can(admin, "post:delete")).toBe(true);
+    expect(can(moderator, "post:create")).toBe(true);
+    expect(can(regularUser, "post:read")).toBe(true);
   });
 
   test("moderator can only update their own post", () => {
@@ -83,100 +74,16 @@ describe("createCan", () => {
     expect(can(moderator, "post:update", post("someone-else"))).toBe(false);
   });
 
-  test("moderator has an unconditional delete regardless of authorship", () => {
-    expect(can(moderator, "post:delete")).toBe(true);
+  test("user's async update check resolves to the declared ownership result", async () => {
+    await expect(can(regularUser, "post:update", post(regularUser.id))).resolves.toBe(true);
+    await expect(can(regularUser, "post:update", post("someone-else"))).resolves.toBe(false);
   });
 
-  test("user can only update their own post", () => {
-    expect(can(regularUser, "post:update", post(regularUser.id))).toBe(true);
-    expect(can(regularUser, "post:update", post("someone-else"))).toBe(false);
-  });
-
-  test("user can only delete their own post", () => {
-    expect(can(regularUser, "post:delete", post(regularUser.id))).toBe(true);
-    expect(can(regularUser, "post:delete", post("someone-else"))).toBe(false);
-  });
-});
-
-describe("createCan async checks", () => {
-  const asyncPermissions = {
-    post: {
-      admin: { create: true, read: true, update: true, delete: true },
-      moderator: {
-        create: true,
-        read: true,
-        update: async (user, post) => {
-          await Promise.resolve();
-          return user.id === post.authorID;
-        },
-        delete: true,
-      },
-      user: {
-        create: true,
-        read: true,
-        update: async (user, post) => {
-          await Promise.resolve();
-          return user.id === post.authorID;
-        },
-        delete: (user, post) => user.id === post.authorID,
-      },
-    },
-  } satisfies Permissions;
-
-  const asyncCan = createCan<
-    User,
-    typeof roles,
-    typeof actions,
-    Resources,
-    typeof asyncPermissions
-  >(asyncPermissions);
-
-  test("sync checks stay synchronous even in a table with async checks elsewhere", () => {
-    expect(asyncCan(admin, "post:create")).toBe(true);
-  });
-
-  test("async check resolves to the declared ownership result", async () => {
-    await expect(asyncCan(regularUser, "post:update", post(regularUser.id))).resolves.toBe(true);
-    await expect(asyncCan(regularUser, "post:update", post("someone-else"))).resolves.toBe(false);
-  });
-});
-
-describe("createCan role-level boolean shortcut", () => {
-  const boolPermissions = {
-    post: {
-      admin: true,
-      moderator: {
-        create: true,
-        read: true,
-        update: (user, post) => user.id === post.authorID,
-        delete: true,
-      },
-      user: false,
-    },
-  } satisfies Permissions;
-
-  const boolCan = createCan<User, typeof roles, typeof actions, Resources, typeof boolPermissions>(
-    boolPermissions
-  );
-
-  test("role-level `true` grants every action, no resource ever required", () => {
-    expect(boolCan(admin, "post:create")).toBe(true);
-    expect(boolCan(admin, "post:read")).toBe(true);
-    expect(boolCan(admin, "post:update")).toBe(true);
-    expect(boolCan(admin, "post:delete")).toBe(true);
-  });
-
-  test("role-level `false` denies every action, no resource ever required", () => {
-    expect(boolCan(regularUser, "post:create")).toBe(false);
-    expect(boolCan(regularUser, "post:read")).toBe(false);
-    expect(boolCan(regularUser, "post:update")).toBe(false);
-    expect(boolCan(regularUser, "post:delete")).toBe(false);
-  });
-
-  test("mixed table: a sibling role for the same resource keeps its granular per-action checks", () => {
-    expect(boolCan(moderator, "post:create")).toBe(true);
-    expect(boolCan(moderator, "post:update", post(moderator.id))).toBe(true);
-    expect(boolCan(moderator, "post:update", post("someone-else"))).toBe(false);
-    expect(boolCan(moderator, "post:delete")).toBe(true);
+  test("a role can only be asked about permissions it declared", () => {
+    // @ts-expect-error moderator never declared "post:delete"
+    can(moderator, "post:delete");
+    // @ts-expect-error user never declared "post:create" or "post:delete"
+    can(regularUser, "post:delete");
+    expect(true).toBe(true);
   });
 });

@@ -1,34 +1,41 @@
-/**
-*  @param User - user interface
-*  @param Roles - supported roles
-*  @param Actions - supported actions
-*  @param Resources - protected resources in the form of Record<string, ResourceType>
-*  @param ResourceExcludedActions - actions that don't require a resource check in the form of Record<action extends Actions, Resources[K]> 
-*/
+export type PermissionKey<
+  Actions extends readonly string[],
+  Resources extends Record<string, any>,
+> = `${Extract<keyof Resources, string>}:${Actions[number]}`;
+
+type CheckFor<P extends string, User, Resources extends Record<string, any>> =
+  P extends `${infer K}:${string}`
+    ? K extends keyof Resources
+      ? boolean | ((user: User, resource: Resources[K]) => boolean | Promise<boolean>)
+      : never
+    : never;
+
+type ResourceOf<P extends string, Resources extends Record<string, any>> =
+  P extends `${infer K}:${string}` ? (K extends keyof Resources ? Resources[K] : never) : never;
+
 export type PermissionsGenerator<
   User extends { role: Roles[number] },
-  Roles extends (readonly string[]),
-  Actions extends (readonly string[]),
+  Roles extends readonly string[],
+  Actions extends readonly string[],
   Resources extends Record<string, any>,
 > = {
-    [R in keyof Resources]: {
-      [UR in Roles[number]]: boolean | ({
-        [A in Actions[number]]: ((user: User & { role: UR }, resource: Resources[R]) => boolean | Promise<boolean>) | boolean;
-      });
-    }
-  }
+  [UR in Roles[number]]: Partial<{
+    [P in PermissionKey<Actions, Resources>]: CheckFor<P, User & { role: UR }, Resources>;
+  }>;
+};
 
 /**
 * Caller's `user` must keep a literal `role` (e.g. `satisfies User`, not `: User`) or
-* `can` can't narrow which role's implementation applies, and conservatively requires
-* a resource whenever any role needs one for that action.
+* `can` can't narrow which role's permissions apply. A role can only be asked about a
+* permission it actually declared — anything else is a compile error, not an implicit
+* deny.
 */
 export function createCan<
   User extends { role: Roles[number] },
   Roles extends readonly string[],
   Actions extends readonly string[],
   Resources extends Record<string, any>,
-  P extends PermissionsGenerator<User, Roles, Actions, Resources>
+  P extends PermissionsGenerator<User, Roles, Actions, Resources>,
 >(permissions: P) {
   // number of declared params on a check value (booleans count as 0)
   type ParamCount<T> = T extends (...args: infer PA) => any ? PA["length"] : 0;
@@ -36,40 +43,22 @@ export function createCan<
   // true if this specific check value's function returns a Promise
   type IsAsync<T> = T extends (...args: any[]) => infer Ret ? (Ret extends Promise<any> ? true : false) : false;
 
-  // resolves the actual check value for a role, unwrapping the role-level boolean
-  // shortcut. Entry must be a naked type parameter here (not `P[K][R]` inlined) for
-  // the conditional to narrow inside its own branches.
-  type CheckValue<Entry, A extends PropertyKey> =
-    Entry extends boolean ? Entry : A extends keyof Entry ? Entry[A] : never;
-
-  return function can<
-    K extends keyof Resources,
-    A extends Actions[number],
-    R extends Roles[number]
-  >(
+  return function can<R extends Roles[number], Perm extends keyof P[R] & string>(
     user: User & { role: R },
-    action: `${K & string}:${A}`,
-    ...args: ParamCount<CheckValue<P[K][R], A>> extends 2 ? [resource: Resources[K]] : [resource?: Resources[K]]
-  ): IsAsync<CheckValue<P[K][R], A>> extends true ? Promise<boolean> : boolean {
-    const [resource] = args as [Resources[K]?];
-    const unformatted = action.split(":");
-    const r = unformatted[0] as K;
-    const a = unformatted[1] as A;
-    const test = permissions[r][user.role];
+    permission: Perm,
+    ...args: ParamCount<P[R][Perm]> extends 2
+      ? [resource: ResourceOf<Perm, Resources>]
+      : [resource?: ResourceOf<Perm, Resources>]
+  ): IsAsync<P[R][Perm]> extends true ? Promise<boolean> : boolean {
+    const [resource] = args as [ResourceOf<Perm, Resources>?];
+    const table = permissions[user.role] as Record<
+      string,
+      boolean | ((user: User, resource?: unknown) => boolean | Promise<boolean>)
+    >;
+    const check = table[permission];
 
-    if (typeof test === "boolean") {
-      return test as unknown as IsAsync<CheckValue<P[K][R], A>> extends true ? Promise<boolean> : boolean;
-    }
+    const result = typeof check === "function" ? check(user, resource) : check;
 
-    // `test` is proven non-boolean by the guard above, but that's a runtime fact TS
-    // can't fold back into `P[K][R]` (a deferred generic indexed-access, not a
-    // concrete union) — so index through a plain, explicitly-indexable shape instead.
-    const checks = test as Record<A, boolean | ((user: User, resource?: Resources[K]) => boolean | Promise<boolean>)>;
-
-    const result = typeof checks[a] === "function"
-      ? (checks[a] as (user: User, resource?: Resources[K]) => boolean | Promise<boolean>)(user, resource)
-      : checks[a];
-
-    return result as IsAsync<CheckValue<P[K][R], A>> extends true ? Promise<boolean> : boolean;
+    return result as IsAsync<P[R][Perm]> extends true ? Promise<boolean> : boolean;
   };
 }
