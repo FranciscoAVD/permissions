@@ -59,6 +59,29 @@ can(user, "post:delete");               // compile error — `user` never declar
 
 A permission's check can be a plain `boolean` or a `(user, resource) => boolean | Promise<boolean>` function — `can`'s resource argument is required exactly when that role's specific check actually reads it, and its return type is `Promise<boolean>` exactly when that check is async. Roles are never forced to enumerate permissions they don't have (there's no need to write a `false` entry for every action a role lacks), but each role's set of callable permissions is fixed at the type level — nothing is implicitly allowed by a typo, and nothing is implicitly denied by a `can()` call that shouldn't type-check in the first place.
 
+### Wildcards
+
+A role can declare `"resource:*"` instead of listing every action on that resource individually. A more specific `"resource:action"` key always overrides the wildcard for that one action — which is also how you express "allow everything except X":
+
+```ts
+const permissions = {
+  admin: {
+    "post:*": true,
+  },
+  moderator: {
+    "post:*": true,
+    "post:delete": false, // overrides the wildcard for this one action
+  },
+  user: {}, // every role still needs an entry — empty means no permissions
+} satisfies Permissions;
+
+can(admin, "post:create");     // true  — falls back to "post:*"
+can(moderator, "post:delete"); // false — the specific key wins over the wildcard
+can(moderator, "post:create"); // true  — falls back to "post:*"
+```
+
+Only resource-scoped wildcards (`"post:*"`) are supported — a bare `"*"` spanning every resource is not.
+
 ## Develop
 
 ```bash

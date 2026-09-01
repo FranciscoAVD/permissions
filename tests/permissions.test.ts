@@ -87,3 +87,59 @@ describe("createCan", () => {
     expect(true).toBe(true);
   });
 });
+
+describe("wildcard permissions", () => {
+  const wcRoles = ["superadmin", "editor", "owner", "guest"] as const;
+  type WCUser = { id: string; name: string; role: (typeof wcRoles)[number] };
+  type WCPermissions = PermissionsGenerator<WCUser, typeof wcRoles, typeof actions, Resources>;
+
+  const wcPermissions = {
+    superadmin: { "post:*": true },
+    editor: { "post:*": true, "post:delete": false },
+    owner: { "post:*": (user, post) => user.id === post.authorID },
+    guest: { "post:read": true },
+  } satisfies WCPermissions;
+
+  const wcCan = createCan<WCUser, typeof wcRoles, typeof actions, Resources, typeof wcPermissions>(
+    wcPermissions
+  );
+
+  const superadmin = { id: "1", name: "Super", role: "superadmin" } satisfies WCUser;
+  const editor = { id: "2", name: "Editor", role: "editor" } satisfies WCUser;
+  const owner = { id: "3", name: "Owner", role: "owner" } satisfies WCUser;
+  const guest = { id: "4", name: "Guest", role: "guest" } satisfies WCUser;
+
+  test("a role declaring only a wildcard can be asked about every action on that resource, no resource needed", () => {
+    expect(wcCan(superadmin, "post:create")).toBe(true);
+    expect(wcCan(superadmin, "post:read")).toBe(true);
+    expect(wcCan(superadmin, "post:update")).toBe(true);
+    expect(wcCan(superadmin, "post:delete")).toBe(true);
+  });
+
+  test("a specific key overrides the wildcard for that action; wildcard still covers the rest", () => {
+    expect(wcCan(editor, "post:delete")).toBe(false);
+    expect(wcCan(editor, "post:create")).toBe(true);
+    expect(wcCan(editor, "post:read")).toBe(true);
+    expect(wcCan(editor, "post:update")).toBe(true);
+  });
+
+  test("a function-valued wildcard requires the resource and resolves per-resource", () => {
+    expect(wcCan(owner, "post:update", post(owner.id))).toBe(true);
+    expect(wcCan(owner, "post:update", post("someone-else"))).toBe(false);
+    expect(wcCan(owner, "post:delete", post(owner.id))).toBe(true);
+    expect(wcCan(owner, "post:delete", post("someone-else"))).toBe(false);
+  });
+
+  test("a function-valued wildcard is a compile error without a resource, and throws if bypassed at runtime", () => {
+    expect(() => {
+      // @ts-expect-error function-valued "post:*" requires a resource argument
+      wcCan(owner, "post:create");
+    }).toThrow();
+  });
+
+  test("roles without a wildcard are unaffected — only declared keys are askable", () => {
+    expect(wcCan(guest, "post:read")).toBe(true);
+    // @ts-expect-error guest never declared "post:create" and has no "post:*"
+    wcCan(guest, "post:create");
+  });
+});

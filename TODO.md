@@ -7,9 +7,12 @@ Ordered by priority — highest-impact/most-foundational first. Each item includ
 map (`PermissionsGenerator`/`createCan` in `index.ts`). Gained: a role can only be asked
 about a permission it actually declared — `can(user, "post:delete")` is a compile error, not
 an implicit deny, if that role never listed `"post:delete"`. Roles also no longer have to
-enumerate permissions they lack (no forced `false` entries). Lost: the v1.2.0 whole-role
-`boolean` shortcut (`admin: true` for "every action") has no equivalent yet in the flat
-shape — see the reopened item below.
+enumerate permissions they lack (no forced `false` entries). Lost, then partially
+replaced in v2.1.0: the v1.2.0 whole-role `boolean` shortcut (`admin: true` for "every
+action, every resource") has no direct equivalent — a `"resource:*"` key added in
+v2.1.0 covers "every action on this resource," with a more specific
+`"resource:action"` key overriding the wildcard, but a bare `"*"` spanning every
+resource is still deliberately unimplemented.
 
 ## High priority
 
@@ -22,12 +25,13 @@ shape — see the reopened item below.
       role repeats its full grant list (`admin` still lists `"post:create"`, `"post:read"`, etc.
       individually even though it's "obviously" a superset). Needs either `roles: Role[]` on
       `User`, or a way to say "role A inherits role B's grants plus these."
-- [ ] **Wildcard / default fallback.** Reopened by the v2.0.0 redesign — the whole-role `boolean`
-      shortcut this used to have (`admin: true`) doesn't exist in the flat `"resource:action"` map
-      shape. Needs a new mechanism, e.g. a `"post:*"` or `"*"` key meaning "every action on this
-      resource" / "everything," resolved against `PermissionKey` the same way individual keys are.
-      Also still doesn't cover "allow everything except X" (explicit per-action exceptions against
-      a default).
+- [x] **Wildcard / default fallback (resource-scoped).** v2.1.0 added a `"resource:*"` key
+      meaning "every action on this resource," resolved with most-specific-wins precedence
+      against `"resource:action"` keys — so "allow everything except X" now falls directly
+      out of "grant the wildcard, then override the exception." A bare `"*"` (every resource,
+      every action) is deliberately out of scope: a function-valued bare `"*"` would need
+      `resource` typed as a union across every resource type, which isn't very usable — left
+      for a future item if ever wanted.
 
 ## Medium priority
 
