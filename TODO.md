@@ -45,12 +45,16 @@ resource is still deliberately unimplemented.
 
 ## Medium priority
 
-- [ ] **Per-resource action sets.** `Actions` is one global union shared by every resource, so a
-      resource-specific action (e.g. `post:publish`) still shows up as a nonsensical
-      `"comment:publish"` key in every other resource's permission set. The v2.0.0 redesign
-      removed the *boilerplate* cost (no role is forced to write a dummy entry for it anymore),
-      but the type-noise/autocomplete-pollution cost remains. Would need `Resources` to map each
-      key to its own action union.
+- [x] **Per-resource action sets.** `Actions` was one global union shared by every resource, so a
+      resource-specific action (e.g. `post:publish`) showed up as a nonsensical
+      `"comment:publish"` key in every other resource's permission set. Each `Resources` entry is
+      now `{ model: ...; actions?: ... }` — extra actions declared there are additive to the
+      global `Actions` union for that resource only, including through `"resource:*"` wildcard
+      expansion. This is a breaking change to what a `Resources` entry means: every existing
+      `{ post: Post }` declaration becomes `{ post: { model: Post } }`. See
+      `PER_RESOURCE_ACTIONS.md` for the design record — shipped as "Option B" (colocated on the
+      resource entry) rather than the doc's recommended "Option A" (a separate map), traded for
+      keeping a resource's actions next to its model instead of a non-breaking, additive change.
 - [ ] **Query/list-level filtering.** `can()` only answers "can this user touch this specific
       instance," not "what's the filter for which posts this user can see" — needed for any list
       endpoint. Likely means check functions can optionally return a query predicate, not just a

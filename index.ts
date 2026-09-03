@@ -1,27 +1,45 @@
+// a resource entry's model type — the actual object a check function receives.
+type ModelOf<R> = R extends { model: infer M } ? M : never;
+
+// a resource entry's extra, resource-specific actions (on top of the global `Actions`
+// union) — e.g. `"publish" | "archive"` on a `post` entry that other resources don't get.
+type ExtraActionsOf<R> = R extends { actions: infer A extends string } ? A : never;
+
 export type PermissionKey<
   Actions extends readonly string[],
-  Resources extends Record<string, any>,
-> =
-  | `${Extract<keyof Resources, string>}:${Actions[number]}`
-  | `${Extract<keyof Resources, string>}:*`;
+  Resources extends Record<string, { model: any; actions?: string }>,
+> = {
+  [K in Extract<keyof Resources, string>]:
+    | `${K}:${Actions[number] | ExtraActionsOf<Resources[K]>}`
+    | `${K}:*`;
+}[Extract<keyof Resources, string>];
 
 type CheckFor<P extends string, User, Resources extends Record<string, any>> =
   P extends `${infer K}:${string}`
     ? K extends keyof Resources
-      ? boolean | ((user: User, resource: Resources[K]) => boolean | Promise<boolean>)
+      ? boolean | ((user: User, resource: ModelOf<Resources[K]>) => boolean | Promise<boolean>)
       : never
     : never;
 
 type ResourceOf<P extends string, Resources extends Record<string, any>> =
-  P extends `${infer K}:${string}` ? (K extends keyof Resources ? Resources[K] : never) : never;
+  P extends `${infer K}:${string}`
+    ? K extends keyof Resources
+      ? ModelOf<Resources[K]>
+      : never
+    : never;
 
 // expands a single declared key into the concrete permission(s) it covers — a wildcard
-// key expands to every action on its resource, anything else passes through unchanged.
-// `Key` must be a naked type parameter here (not inlined) for the conditional to
-// distribute over the union callers feed it (e.g. `keyof RoleEntry & string`) — same
-// rule this file already relies on for `CheckValue` in the v2.0.0 migration.
-type Expand<Key extends string, Actions extends readonly string[]> =
-  Key extends `${infer Res}:*` ? `${Res}:${Actions[number]}` : Key;
+// key expands to every action on its resource (global actions plus that resource's own
+// extras), anything else passes through unchanged. `Key` must be a naked type parameter
+// here (not inlined) for the conditional to distribute over the union callers feed it
+// (e.g. `keyof RoleEntry & string`) — same rule this file already relies on for
+// `CheckValue` in the v2.0.0 migration.
+type Expand<Key extends string, Actions extends readonly string[], Resources extends Record<string, any>> =
+  Key extends `${infer Res}:*`
+    ? Res extends keyof Resources
+      ? `${Res}:${Actions[number] | ExtraActionsOf<Resources[Res]>}`
+      : `${Res}:${Actions[number]}`
+    : Key;
 
 // a role entry's own permission keys, excluding the reserved `extends` field — `extends`
 // declares parent roles, it is never itself a "resource:action" permission.
@@ -50,11 +68,19 @@ type DistributeAncestors<Perms, A extends keyof Perms, D extends number> =
 // every concrete permission a role can be asked about: its own declared keys (wildcards
 // expanded) unioned with every ancestor's, recursively. Order doesn't matter here — it's
 // a plain set union, unlike `ResolveCheck` below where override precedence matters.
-type EffectiveKeys<Perms, R extends keyof Perms, Actions extends readonly string[]> =
-  DistributeEffectiveKeys<Perms, R | AncestorRoles<Perms, R>, Actions>;
+type EffectiveKeys<
+  Perms,
+  R extends keyof Perms,
+  Actions extends readonly string[],
+  Resources extends Record<string, any>,
+> = DistributeEffectiveKeys<Perms, R | AncestorRoles<Perms, R>, Actions, Resources>;
 
-type DistributeEffectiveKeys<Perms, Rs extends keyof Perms, Actions extends readonly string[]> =
-  Rs extends any ? Expand<DeclaredKeys<Perms[Rs]>, Actions> : never;
+type DistributeEffectiveKeys<
+  Perms,
+  Rs extends keyof Perms,
+  Actions extends readonly string[],
+  Resources extends Record<string, any>,
+> = Rs extends any ? Expand<DeclaredKeys<Perms[Rs]>, Actions, Resources> : never;
 
 // resolves a role's OWN check for a permission only — exact key, falling back to the
 // role's own wildcard. Does not look at ancestors. `never` if the role itself declares
@@ -98,7 +124,7 @@ export type PermissionsGenerator<
   User extends { role: Roles[number] },
   Roles extends readonly string[],
   Actions extends readonly string[],
-  Resources extends Record<string, any>,
+  Resources extends Record<string, { model: any; actions?: string }>,
 > = {
   [UR in Roles[number]]: Partial<{
     [P in PermissionKey<Actions, Resources>]: CheckFor<P, User, Resources>;
@@ -194,7 +220,7 @@ export function createCan<
   // true if this specific check value's function returns a Promise
   type IsAsync<T> = T extends (...args: any[]) => infer Ret ? (Ret extends Promise<any> ? true : false) : false;
 
-  return function can<R extends Roles[number], Perm extends EffectiveKeys<P, R, Actions>>(
+  return function can<R extends Roles[number], Perm extends EffectiveKeys<P, R, Actions, Resources>>(
     user: User & { role: R },
     permission: Perm,
     ...args: ParamCount<ResolveCheck<P, R, Perm>> extends 2

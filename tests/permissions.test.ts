@@ -18,7 +18,7 @@ type Post = {
 };
 
 type Resources = {
-  post: Post;
+  post: { model: Post };
 };
 
 type Permissions = PermissionsGenerator<User, typeof roles, typeof actions, Resources>;
@@ -305,5 +305,58 @@ describe("role hierarchy", () => {
     expect(() => {
       createCan<HUser, typeof hRoles, typeof actions, Resources, typeof hPermissions>(hPermissions);
     }).toThrow();
+  });
+});
+
+describe("per-resource action sets", () => {
+  const prRoles = ["admin", "editor"] as const;
+  type PRUser = { id: string; name: string; role: (typeof prRoles)[number] };
+
+  type Comment = {
+    id: string;
+    postID: string;
+    authorID: string;
+    body: string;
+  };
+
+  type PRResources = {
+    post: { model: Post; actions: "publish" | "archive" };
+    comment: { model: Comment };
+  };
+
+  type PRPermissions = PermissionsGenerator<PRUser, typeof prRoles, typeof actions, PRResources>;
+
+  const prPermissions = {
+    admin: {
+      "post:*": true, // wildcard covers "publish"/"archive" too, not just the global actions
+    },
+    editor: {
+      "post:read": true,
+      "post:publish": (user, post) => user.id === post.authorID,
+      "comment:read": true,
+    },
+  } satisfies PRPermissions;
+
+  const prCan = createCan<PRUser, typeof prRoles, typeof actions, PRResources, typeof prPermissions>(
+    prPermissions
+  );
+
+  const admin = { id: "1", name: "Admin", role: "admin" } satisfies PRUser;
+  const editor = { id: "2", name: "Editor", role: "editor" } satisfies PRUser;
+
+  test("a resource-specific action can be granted and checked like any other", () => {
+    expect(prCan(editor, "post:publish", post(editor.id))).toBe(true);
+    expect(prCan(editor, "post:publish", post("someone-else"))).toBe(false);
+  });
+
+  test("a wildcard on the resource covers its extra actions too", () => {
+    expect(prCan(admin, "post:publish")).toBe(true);
+    expect(prCan(admin, "post:archive")).toBe(true);
+  });
+
+  test("a resource-specific action doesn't leak into other resources' key space", () => {
+    expect(prCan(editor, "comment:read")).toBe(true);
+    // @ts-expect-error "publish" is a post-only action, not a valid comment action
+    prCan(editor, "comment:publish");
   });
 });

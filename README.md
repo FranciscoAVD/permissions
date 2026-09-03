@@ -18,7 +18,7 @@ const actions = ["create", "read", "update", "delete"] as const;
 
 type User = { id: string; name: string; role: (typeof roles)[number] };
 type Post = { id: string; authorID: string; body: string; createdAt: Date };
-type Resources = { post: Post };
+type Resources = { post: { model: Post } };
 
 type Permissions = PermissionsGenerator<User, typeof roles, typeof actions, Resources>;
 
@@ -81,6 +81,34 @@ can(moderator, "post:create"); // true  — falls back to "post:*"
 ```
 
 Only resource-scoped wildcards (`"post:*"`) are supported — a bare `"*"` spanning every resource is not.
+
+### Per-resource actions
+
+`Resources` entries are always `{ model: ... }`, and can optionally add an `actions` union for
+actions that only make sense on that one resource — they're additive to the global `Actions` union
+and don't show up on any other resource's keys:
+
+```ts
+type Comment = { id: string; postID: string; authorID: string; body: string };
+type Resources = {
+  post: { model: Post; actions: "publish" | "archive" };
+  comment: { model: Comment };
+};
+
+const permissions = {
+  admin: {
+    "post:*": true, // wildcard covers "publish" and "archive" too, not just the global actions
+  },
+  editor: {
+    "post:read": true,
+    "post:publish": (user, post) => user.id === post.authorID,
+  },
+} satisfies Permissions;
+
+can(admin, "post:publish");             // true — covered by "post:*"
+can(editor, "post:publish", ownPost);   // true — editor.id matches ownPost.authorID
+can(editor, "comment:publish");         // compile error — "publish" isn't a comment action
+```
 
 ### Role hierarchy
 
