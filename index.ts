@@ -146,7 +146,10 @@ export type PermissionsGenerator<
 * specific `"resource:action"` key always overrides the wildcard for that action. A role
 * may also declare `extends: [...]` to inherit another role's (or chain of roles')
 * grants — its own keys always win over anything inherited, and when multiple parents
-* are listed, later entries override earlier ones on the same key.
+* are listed, later entries override earlier ones on the same key. A `Resources` entry
+* may declare an `actions` union (alongside its required `model`) for actions specific to
+* that one resource — additive to the global `Actions` union, invisible to every other
+* resource's keys, and included in that resource's own `"resource:*"` wildcard expansion.
 */
 export function createCan<
   User extends { role: Roles[number] },

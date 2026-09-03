@@ -95,19 +95,30 @@ type Resources = {
   comment: { model: Comment };
 };
 
+type Permissions = PermissionsGenerator<User, typeof roles, typeof actions, Resources>;
+
 const permissions = {
   admin: {
     "post:*": true, // wildcard covers "publish" and "archive" too, not just the global actions
   },
-  editor: {
+  moderator: {
     "post:read": true,
     "post:publish": (user, post) => user.id === post.authorID,
   },
+  user: {},
 } satisfies Permissions;
 
-can(admin, "post:publish");             // true — covered by "post:*"
-can(editor, "post:publish", ownPost);   // true — editor.id matches ownPost.authorID
-can(editor, "comment:publish");         // compile error — "publish" isn't a comment action
+const can = createCan<User, typeof roles, typeof actions, Resources, typeof permissions>(
+  permissions
+);
+
+const adminUser = { id: "1", name: "Ada", role: "admin" } satisfies User;
+const modUser = { id: "2", name: "Bo", role: "moderator" } satisfies User;
+const modsPost: Post = { id: "p1", authorID: "2", body: "hi", createdAt: new Date() };
+
+can(adminUser, "post:publish");            // true — covered by "post:*"
+can(modUser, "post:publish", modsPost);    // true — modUser.id ("2") matches modsPost.authorID
+can(modUser, "comment:publish");           // compile error — "publish" isn't a comment action
 ```
 
 ### Role hierarchy

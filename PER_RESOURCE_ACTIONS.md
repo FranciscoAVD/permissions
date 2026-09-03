@@ -1,5 +1,12 @@
 # Per-resource action sets — design options
 
+> **Outcome: shipped as Option B**, not the recommendation below. Extra actions are colocated on
+> the `Resources` entry (`{ post: { model: Post; actions: "publish" | "archive" } }`), as a
+> breaking change to what a `Resources` entry means — see the "Changed" note in `TODO.md`. The
+> wildcard-expansion open question at the bottom of this doc was resolved by threading `Resources`
+> itself through `Expand`/`EffectiveKeys` in `index.ts`, since actions now live on `Resources`
+> rather than a separate map.
+
 Roadmap item from `TODO.md` (Medium priority): `Actions` today is one global tuple shared by
 every resource, via `PermissionKey<Actions, Resources>`. Adding a resource-specific action (e.g.
 `post:publish`) means either polluting the global tuple — which leaks a nonsensical
