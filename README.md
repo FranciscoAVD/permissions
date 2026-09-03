@@ -82,6 +82,33 @@ can(moderator, "post:create"); // true  — falls back to "post:*"
 
 Only resource-scoped wildcards (`"post:*"`) are supported — a bare `"*"` spanning every resource is not.
 
+### Role hierarchy
+
+A role's entry can declare `extends: [...]` — an array of other role names — to inherit their grants:
+
+```ts
+const permissions = {
+  viewer: {
+    "post:read": true,
+  },
+  editor: {
+    extends: ["viewer"],
+    "post:create": true,
+    "post:update": true,
+  },
+  admin: {
+    extends: ["editor"],
+    "post:delete": true,
+  },
+} satisfies Permissions;
+
+can(admin, "post:read");   // true — inherited from viewer via editor
+can(admin, "post:create"); // true — inherited from editor
+can(admin, "post:delete"); // true — admin's own grant
+```
+
+A role's own keys (including its own wildcard) always win over anything inherited, and when multiple parents are listed, later entries override earlier ones on the same key. Inheritance is transitive, and a cyclic `extends` graph is rejected with a clear error when `createCan()` is called.
+
 ## Develop
 
 ```bash

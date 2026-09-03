@@ -21,10 +21,20 @@ resource is still deliberately unimplemented.
       `Promise<boolean>`. `can()`'s return type is derived per call from the actual check
       function's return type, so sync checks stay plain `boolean` — only permissions backed
       by an async check require `await`.
-- [ ] **Multiple roles per user / role hierarchy.** Currently one literal `role` per user, and every
-      role repeats its full grant list (`admin` still lists `"post:create"`, `"post:read"`, etc.
-      individually even though it's "obviously" a superset). Needs either `roles: Role[]` on
-      `User`, or a way to say "role A inherits role B's grants plus these."
+- [x] **Role hierarchy.** A role's entry can now declare `extends: Role[]` to inherit another
+      role's (or chain of roles') grants — `admin` no longer has to repeat every permission
+      `editor` already lists if it simply declares `extends: ["editor"]`. A role's own keys
+      always override anything inherited, and later entries in `extends` override earlier ones
+      on the same key when a role has multiple parents. Cyclic `extends` graphs are rejected at
+      `createCan()` construction time, not silently allowed. Deliberately still out of scope:
+      multiple roles *per user* (see below) — this only lets one role inherit from another at
+      the type/permissions-table level.
+- [ ] **Multiple roles per user.** A user still has exactly one literal `role` — there's no
+      `roles: Role[]` on `User` for a user who genuinely holds more than one role at once (as
+      opposed to one role inheriting another's grants, shipped above via role hierarchy). Would
+      need `can()` to check across every role a user holds, raising the same "which check wins on
+      conflict" question role hierarchy just answered, but for a set of roles picked per-user at
+      runtime instead of a fixed graph declared per-role at the type level.
 - [x] **Wildcard / default fallback (resource-scoped).** v2.1.0 added a `"resource:*"` key
       meaning "every action on this resource," resolved with most-specific-wins precedence
       against `"resource:action"` keys — so "allow everything except X" now falls directly

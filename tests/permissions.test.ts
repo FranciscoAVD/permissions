@@ -143,3 +143,167 @@ describe("wildcard permissions", () => {
     wcCan(guest, "post:create");
   });
 });
+
+describe("role hierarchy", () => {
+  test("inheritance is transitive across a chain, and an ungranted permission is still a compile error", () => {
+    const hRoles = ["viewer", "contributor", "manager"] as const;
+    type HUser = { id: string; name: string; role: (typeof hRoles)[number] };
+    type HPermissions = PermissionsGenerator<HUser, typeof hRoles, typeof actions, Resources>;
+
+    const hPermissions = {
+      viewer: {
+        "post:read": true,
+      },
+      contributor: {
+        extends: ["viewer"],
+        "post:create": true,
+      },
+      manager: {
+        extends: ["contributor"],
+        "post:update": true,
+      },
+    } satisfies HPermissions;
+
+    const hCan = createCan<HUser, typeof hRoles, typeof actions, Resources, typeof hPermissions>(
+      hPermissions
+    );
+
+    const manager = { id: "1", name: "Manager", role: "manager" } satisfies HUser;
+
+    expect(hCan(manager, "post:read")).toBe(true); // inherited transitively from viewer
+    expect(hCan(manager, "post:create")).toBe(true); // inherited from contributor
+    expect(hCan(manager, "post:update")).toBe(true); // manager's own
+
+    // @ts-expect-error nobody in the chain declared "post:delete"
+    hCan(manager, "post:delete");
+  });
+
+  test("a child can override one inherited action while the rest still falls through", () => {
+    const hRoles = ["base", "restricted"] as const;
+    type HUser = { id: string; name: string; role: (typeof hRoles)[number] };
+    type HPermissions = PermissionsGenerator<HUser, typeof hRoles, typeof actions, Resources>;
+
+    const hPermissions = {
+      base: {
+        "post:create": true,
+        "post:delete": true,
+      },
+      restricted: {
+        extends: ["base"],
+        "post:delete": false, // overrides just this one inherited action
+      },
+    } satisfies HPermissions;
+
+    const hCan = createCan<HUser, typeof hRoles, typeof actions, Resources, typeof hPermissions>(
+      hPermissions
+    );
+
+    const restricted = { id: "1", name: "Restricted", role: "restricted" } satisfies HUser;
+
+    expect(hCan(restricted, "post:create")).toBe(true); // still inherited from base
+    expect(hCan(restricted, "post:delete")).toBe(false); // restricted's own override wins
+  });
+
+  test("a wildcard inherits transitively through a chain with no re-declaration in between", () => {
+    const hRoles = ["root", "mid", "leaf"] as const;
+    type HUser = { id: string; name: string; role: (typeof hRoles)[number] };
+    type HPermissions = PermissionsGenerator<HUser, typeof hRoles, typeof actions, Resources>;
+
+    const hPermissions = {
+      root: {
+        "post:*": true,
+      },
+      mid: {
+        extends: ["root"],
+      },
+      leaf: {
+        extends: ["mid"],
+      },
+    } satisfies HPermissions;
+
+    const hCan = createCan<HUser, typeof hRoles, typeof actions, Resources, typeof hPermissions>(
+      hPermissions
+    );
+
+    const leaf = { id: "1", name: "Leaf", role: "leaf" } satisfies HUser;
+
+    expect(hCan(leaf, "post:create")).toBe(true);
+    expect(hCan(leaf, "post:read")).toBe(true);
+    expect(hCan(leaf, "post:update")).toBe(true);
+    expect(hCan(leaf, "post:delete")).toBe(true);
+  });
+
+  test("with multiple parents, a later entry in extends overrides an earlier one on the same key", () => {
+    const hRoles = ["teamA", "teamB", "combined"] as const;
+    type HUser = { id: string; name: string; role: (typeof hRoles)[number] };
+    type HPermissions = PermissionsGenerator<HUser, typeof hRoles, typeof actions, Resources>;
+
+    const hPermissions = {
+      teamA: {
+        "post:update": true,
+      },
+      teamB: {
+        "post:update": false,
+      },
+      combined: {
+        extends: ["teamA", "teamB"], // teamB is listed last, so it wins
+      },
+    } satisfies HPermissions;
+
+    const hCan = createCan<HUser, typeof hRoles, typeof actions, Resources, typeof hPermissions>(
+      hPermissions
+    );
+
+    const combined = { id: "1", name: "Combined", role: "combined" } satisfies HUser;
+
+    expect(hCan(combined, "post:update")).toBe(false); // teamB (last-listed) wins over teamA
+  });
+
+  test("a role's own key beats every parent regardless of extends order", () => {
+    const hRoles = ["teamA", "teamB", "combined"] as const;
+    type HUser = { id: string; name: string; role: (typeof hRoles)[number] };
+    type HPermissions = PermissionsGenerator<HUser, typeof hRoles, typeof actions, Resources>;
+
+    const hPermissions = {
+      teamA: {
+        "post:update": true,
+      },
+      teamB: {
+        "post:update": true,
+      },
+      combined: {
+        extends: ["teamB", "teamA"], // teamA listed last, but combined's own key still wins
+        "post:update": false,
+      },
+    } satisfies HPermissions;
+
+    const hCan = createCan<HUser, typeof hRoles, typeof actions, Resources, typeof hPermissions>(
+      hPermissions
+    );
+
+    const combined = { id: "1", name: "Combined", role: "combined" } satisfies HUser;
+
+    expect(hCan(combined, "post:update")).toBe(false); // own declared value always wins
+  });
+
+  test("a cyclic extends graph throws at createCan() construction time", () => {
+    const hRoles = ["a", "b"] as const;
+    type HUser = { id: string; name: string; role: (typeof hRoles)[number] };
+    type HPermissions = PermissionsGenerator<HUser, typeof hRoles, typeof actions, Resources>;
+
+    const hPermissions = {
+      a: {
+        extends: ["b"],
+        "post:read": true,
+      },
+      b: {
+        extends: ["a"],
+        "post:create": true,
+      },
+    } satisfies HPermissions;
+
+    expect(() => {
+      createCan<HUser, typeof hRoles, typeof actions, Resources, typeof hPermissions>(hPermissions);
+    }).toThrow();
+  });
+});
