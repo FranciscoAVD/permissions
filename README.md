@@ -107,7 +107,25 @@ can(admin, "post:create"); // true — inherited from editor
 can(admin, "post:delete"); // true — admin's own grant
 ```
 
-A role's own keys (including its own wildcard) always win over anything inherited, and when multiple parents are listed, later entries override earlier ones on the same key. Inheritance is transitive, and a cyclic `extends` graph is rejected with a clear error when `createCan()` is called.
+Inheritance is transitive (`admin` gets `viewer`'s grant through `editor` without redeclaring it), and a cyclic `extends` graph is rejected with a clear error when `createCan()` is called.
+
+A role can list more than one parent. When two parents disagree on the same key, whichever is listed last in `extends` wins — and a role's own keys (including its own wildcard) always win over anything inherited, no matter where that parent sits in `extends`:
+
+```ts
+const permissions = {
+  teamA: {
+    "post:update": true,
+  },
+  teamB: {
+    "post:update": false,
+  },
+  combined: {
+    extends: ["teamA", "teamB"], // teamB is listed last, so it wins
+  },
+} satisfies Permissions;
+
+can(combined, "post:update"); // false — teamB (last-listed) overrides teamA
+```
 
 ## Develop
 
