@@ -20,11 +20,13 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
+      # packages/adapters/hono resolves @vicstack/permissions's types from its built dist/, so
+      # core must be built before typecheck/test can see them.
+      - run: bun run build
+
       - run: bun run typecheck
 
       - run: bun test
-
-      - run: bun run build
 
       - run: bun publish
         working-directory: packages/core
