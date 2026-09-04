@@ -1,6 +1,6 @@
 {
   "name": "@vicstack/permissions",
-  "version": "3.2.1",
+  "version": "3.3.0",
   "description": "Type-safe, role-based permission checking generated from your own User/Roles/Actions/Resources types.",
   "license": "MIT",
   "type": "module",
