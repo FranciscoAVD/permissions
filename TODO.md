@@ -68,7 +68,10 @@ resource is still deliberately unimplemented.
       dedicated primitive. Combinators nest (`and(or(a, b), not(c))` is valid) and share a runtime
       reduction (`combineChecks` in `index.ts`) with `createCan`'s own multi-role
       most-permissive-wins resolution — `evaluateAny` was refactored into that shared helper
-      rather than kept as a near-duplicate.
+      rather than kept as a near-duplicate. `can()`'s resource argument stays required only
+      when at least one composed check actually reads it (`and`/`or`/`not` each carry two
+      overloads — a resource-free one and a general one — so TS picks the narrower one
+      whenever every argument is arity-0/1).
 
 ## Lower priority
 

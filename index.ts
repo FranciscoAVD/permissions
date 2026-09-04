@@ -149,6 +149,12 @@ export type CheckValue<User, Resource> =
   | boolean
   | ((user: User, resource: Resource) => boolean | Promise<boolean>);
 
+// a check that doesn't read a resource at all (a plain boolean, or a 1-arg function). The
+// first, more specific overload of `and`/`or`/`not` below matches only when every composed
+// check is one of these — that's what lets the combinator's own resource argument stay
+// optional instead of always being forced required.
+type NoResourceCheck<User> = boolean | ((user: User) => boolean | Promise<boolean>);
+
 // shared reduction behind `and`/`or` (and behind `createCan`'s own multi-role
 // most-permissive-wins resolution) — "any" short-circuits on a synchronous `true` (OR),
 // "all" short-circuits on a synchronous `false` (AND); either way, only awaits when a
@@ -174,35 +180,42 @@ function combineChecks<User, Resource>(
 
 /**
  * Combines checks with AND: grants only if every check grants. Usable anywhere a check
- * value is expected, including nested inside another `and`/`or`/`not`. Using a combinator
- * always makes `can()`'s resource argument required and its return type `Promise<boolean>`
- * — even if none of the composed checks actually read the resource or are async — since
- * the composed checks' own arity/async-ness isn't visible at `and`'s call site.
+ * value is expected, including nested inside another `and`/`or`/`not`. `can()`'s resource
+ * argument is required exactly when at least one composed check actually reads it — TS
+ * picks that between the two overloads below based on whether every argument matches the
+ * resource-free shape.
  */
+export function and<User>(...checks: NoResourceCheck<User>[]): (user: User) => boolean | Promise<boolean>;
 export function and<User, Resource>(
   ...checks: CheckValue<User, Resource>[]
-): (user: User, resource: Resource) => boolean | Promise<boolean> {
-  return (user, resource) => combineChecks(checks, user, resource, "all");
+): (user: User, resource: Resource) => boolean | Promise<boolean>;
+export function and(...checks: CheckValue<unknown, unknown>[]) {
+  return (user: unknown, resource?: unknown) => combineChecks(checks, user, resource, "all");
 }
 
 /**
- * Combines checks with OR: grants if any check grants. Same resource/async-arity tradeoff
- * as `and` above.
+ * Combines checks with OR: grants if any check grants. Same resource-arity behavior as
+ * `and` above.
  */
+export function or<User>(...checks: NoResourceCheck<User>[]): (user: User) => boolean | Promise<boolean>;
 export function or<User, Resource>(
   ...checks: CheckValue<User, Resource>[]
-): (user: User, resource: Resource) => boolean | Promise<boolean> {
-  return (user, resource) => combineChecks(checks, user, resource, "any");
+): (user: User, resource: Resource) => boolean | Promise<boolean>;
+export function or(...checks: CheckValue<unknown, unknown>[]) {
+  return (user: unknown, resource?: unknown) => combineChecks(checks, user, resource, "any");
 }
 
 /**
  * Negates a check — grants exactly when the wrapped check would deny. Compose with `and`
- * to express "explicit deny": `and(grant, not(veto))`.
+ * to express "explicit deny": `and(grant, not(veto))`. Same resource-arity behavior as
+ * `and`/`or`: required only when the wrapped check itself reads the resource.
  */
+export function not<User>(check: NoResourceCheck<User>): (user: User) => boolean | Promise<boolean>;
 export function not<User, Resource>(
   check: CheckValue<User, Resource>
-): (user: User, resource: Resource) => boolean | Promise<boolean> {
-  return (user, resource) => {
+): (user: User, resource: Resource) => boolean | Promise<boolean>;
+export function not(check: CheckValue<unknown, unknown>) {
+  return (user: unknown, resource?: unknown) => {
     const result = typeof check === "function" ? check(user, resource) : check;
     return result instanceof Promise ? result.then((r) => !r) : !result;
   };

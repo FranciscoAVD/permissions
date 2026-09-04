@@ -226,10 +226,13 @@ const permissions = {
 
 `and`/`or`/`not` compose (`and(or(a, b), not(c))` is a valid check value), and can be used anywhere
 a check value is expected — including as one held role's contribution to multi-role
-most-permissive-wins above. Using a combinator always makes `can()`'s resource argument required
-and its return type `Promise<boolean>`, since the composed checks' own arity and sync/async-ness
-aren't visible at the combinator's call site — safe to `await` either way, even when everything
-actually resolves synchronously.
+most-permissive-wins above. `can()`'s resource argument is required exactly when at least one
+composed check actually reads it — `and(true, true)` needs no resource, but `and(true,
+not(isLocked))` does, since `isLocked` reads it. When used through `can()`, a combinator's result
+type is `Promise<boolean>` (safe to `await` even when everything actually resolves synchronously)
+whenever any composed check *could* be async — TypeScript can't rule that out from a check
+function's declared return type alone, so a Promise-capable check makes the whole combinator
+Promise-typed.
 
 ## Develop
 

@@ -416,18 +416,34 @@ describe("composing checks", () => {
   const lockedPost = (authorID: string): CCPost => ({ ...post(authorID), locked: true });
   const openPost = (authorID: string): CCPost => ({ ...post(authorID), locked: false });
 
-  test("and: grants only when every check grants", () => {
+  test("and: grants only when every check grants, and needs no resource when nothing composed reads one", () => {
     const bothTrue = and(true, true);
     const oneFalse = and(true, false);
-    expect(bothTrue(admin, openPost("x"))).toBe(true);
-    expect(oneFalse(admin, openPost("x"))).toBe(false);
+    expect(bothTrue(admin)).toBe(true);
+    expect(oneFalse(admin)).toBe(false);
   });
 
-  test("or: grants when any check grants", () => {
+  test("or: grants when any check grants, and needs no resource when nothing composed reads one", () => {
     const anyTrue = or(false, true);
     const bothFalse = or(false, false);
-    expect(anyTrue(admin, openPost("x"))).toBe(true);
-    expect(bothFalse(admin, openPost("x"))).toBe(false);
+    expect(anyTrue(admin)).toBe(true);
+    expect(bothFalse(admin)).toBe(false);
+  });
+
+  test("a combinator's resource argument is required only when a composed check actually reads it", () => {
+    const isOwner = (user: User, post: CCPost) => user.id === post.authorID;
+
+    const needsResource = and(true, isOwner); // isOwner is arity 2 -> resource required
+    const noResourceNeeded = and(true, true); // both arity-0/1 -> resource not accepted
+
+    expect(needsResource(admin, openPost(admin.id))).toBe(true);
+    expect(noResourceNeeded(admin)).toBe(true);
+    // @ts-expect-error neither composed check reads a resource, so none is accepted here
+    noResourceNeeded(admin, openPost("x")); // extra arg, harmlessly ignored at runtime
+    expect(() => {
+      // @ts-expect-error isOwner reads the resource, so it's required here
+      needsResource(admin);
+    }).toThrow();
   });
 
   test("not: inverts a check", () => {
@@ -437,7 +453,7 @@ describe("composing checks", () => {
     expect(isOpen(admin, lockedPost("x"))).toBe(false);
   });
 
-  test("explicit deny via and(grant, not(veto)): a broad grant is vetoed for a locked resource", () => {
+  test("explicit deny via and(grant, not(veto)): a broad grant is vetoed for a locked resource", async () => {
     const ccRoles = ["moderator"] as const;
     type CCUser = { id: string; name: string; roles: (typeof ccRoles)[number][] };
     type CCResources = { post: { model: CCPost } };
@@ -457,8 +473,13 @@ describe("composing checks", () => {
 
     const moderator = { id: "1", name: "Mod", roles: ["moderator"] } satisfies CCUser;
 
-    expect(ccCan(moderator, "post:delete", openPost("999"))).toBe(true);
-    expect(ccCan(moderator, "post:delete", lockedPost("999"))).toBe(false);
+    // "post:delete" resolves to a combinator composed from a 2-arg check (isLocked), so its
+    // declared return type is Promise<boolean> even though this particular check actually
+    // resolves synchronously underneath (isLocked is sync) — matches the file's documented
+    // async-arity tradeoff. `await` handles either shape; `.resolves` would not, since it
+    // requires the value to genuinely be a Promise.
+    expect(await ccCan(moderator, "post:delete", openPost("999"))).toBe(true);
+    expect(await ccCan(moderator, "post:delete", lockedPost("999"))).toBe(false);
   });
 
   test("mixes sync and async checks correctly, awaiting only when needed", async () => {
