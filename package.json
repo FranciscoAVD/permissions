@@ -23,7 +23,8 @@
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "test": "bun test",
-    "prepublishOnly": "bun run test && bun run build"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "bun run typecheck && bun run test && bun run build"
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -238,6 +238,25 @@ export type PermissionsGenerator<
   };
 };
 
+// one `can()` call's outcome, handed to `options.logger.onCheck`. `resource`/`permission`
+// stay loosely typed (`unknown`/`string`) since the logger is configured once, before any
+// specific permission or resource type is known at a given `can()` call site — `user` is
+// still the caller's own `User` type, and `user.roles` shows which roles were held.
+export type CheckEvent<User> = {
+  user: User;
+  permission: string;
+  resource: unknown;
+  result: boolean;
+};
+
+export type CreateCanOptions<User> = {
+  logger?: {
+    onCheck: (event: CheckEvent<User>) => void | Promise<void>;
+    /** "always" (default) logs every check; "deny" logs only when `result` is `false`. */
+    when?: "always" | "deny";
+  };
+};
+
 /**
 * Caller's `user` must keep a literal `roles` array (e.g. `satisfies User`, not `: User`)
 * or `can` can't narrow which roles' permissions apply. A role can only be asked about a
@@ -254,7 +273,11 @@ export type PermissionsGenerator<
 * `User.roles` is always an array — a user can hold more than one role at once, and a
 * permission is grantable if ANY held role (or its `extends` ancestors) grants it:
 * most-permissive-wins, a logical OR across every held role's resolved check, not an
-* override.
+* override. An optional second `options.logger` argument fires `onCheck` with the result
+* of every check (or only denials, via `when: "deny"`) — always fire-and-forget, never
+* blocking or affecting `can()`'s own return value, and a throwing/rejecting `onCheck` is
+* swallowed rather than propagated. This does not report which held role's own check
+* decided the outcome — only the aggregate result.
 */
 export function createCan<
   User extends { roles: readonly Roles[number][] },
@@ -262,9 +285,22 @@ export function createCan<
   Actions extends readonly string[],
   Resources extends Record<string, any>,
   P extends PermissionsGenerator<User, Roles, Actions, Resources>,
->(permissions: P) {
+>(permissions: P, options?: CreateCanOptions<User>) {
   type Check = boolean | ((user: User, resource?: unknown) => boolean | Promise<boolean>);
   type Table = Record<string, Check>;
+
+  const logger = options?.logger;
+  const logWhen = logger?.when ?? "always";
+
+  function logCheck(user: User, permission: string, resource: unknown, result: boolean) {
+    if (!logger) return;
+    if (logWhen === "deny" && result) return;
+    try {
+      Promise.resolve(logger.onCheck({ user, permission, resource, result })).catch(() => {});
+    } catch {
+      // a throwing/rejecting onCheck must never break a permission check
+    }
+  }
 
   // flattens each role's effective permission table once, ancestors-first (so a role's
   // own keys, merged in last, always win), following `extends` left-to-right so a later
@@ -348,7 +384,14 @@ export function createCan<
       if (check !== undefined) checks.push(check);
     }
 
-    return combineChecks(checks, user, resource, "any") as true extends IsAsync<
+    const outcome = combineChecks(checks, user, resource, "any");
+    if (outcome instanceof Promise) {
+      outcome.then((result) => logCheck(user, permission as string, resource, result)).catch(() => {});
+    } else {
+      logCheck(user, permission as string, resource, outcome);
+    }
+
+    return outcome as true extends IsAsync<
       ResolveCheckForRoleSet<P, R[number], Perm>
     >
       ? Promise<boolean>

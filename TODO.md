@@ -75,8 +75,16 @@ resource is still deliberately unimplemented.
 
 ## Lower priority
 
-- [ ] **Explainability / audit trail.** No way to ask "why was this denied" or log which rule fired.
-      Valuable for debugging and compliance, not blocking for basic use.
+- [x] **Explainability / audit trail.** Shipped as an optional second argument to
+      `createCan(permissions, options?)`: `options.logger.onCheck(event)` fires with
+      `{ user, permission, resource, result }` on every `can()` call by default, or only
+      denials via `when: "deny"`. Always fire-and-forget — never blocks or affects `can()`'s
+      own result/timing, and a throwing or rejecting `onCheck` is swallowed rather than
+      propagated. Deliberately does not report which specific held role's check decided the
+      outcome (no "which rule fired" attribution) — `event.user.roles` shows which roles were
+      held, but not which one's check produced `result`; adding that would mean threading
+      role/table context through `combineChecks`, which the public `and`/`or` combinators
+      that also use it have no need for.
 - [ ] **Framework integration helpers.** Bare function today — no Express/Hono middleware,
       decorators, or GraphQL directive helpers. Straightforward to add once the core API is stable,
       not worth building against a moving target.

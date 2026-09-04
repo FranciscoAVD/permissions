@@ -510,3 +510,121 @@ describe("composing checks", () => {
     expect(check(regularUser, openPost("someone-else"))).toBe(false); // neither owner nor admin
   });
 });
+
+describe("audit logging", () => {
+  test("logs every check by default, with the correct event fields", () => {
+    const events: { user: User; permission: string; resource: unknown; result: boolean }[] = [];
+    const loggedCan = createCan<User, typeof roles, typeof actions, Resources, typeof permissions>(
+      permissions,
+      {
+        logger: {
+          onCheck: (event) => {
+            events.push(event);
+          },
+        },
+      }
+    );
+    const someoneElsePost = post("someone-else");
+
+    expect(loggedCan(admin, "post:read")).toBe(true);
+    expect(loggedCan(moderator, "post:update", someoneElsePost)).toBe(false);
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toEqual({ user: admin, permission: "post:read", resource: undefined, result: true });
+    expect(events[1]).toEqual({
+      user: moderator,
+      permission: "post:update",
+      resource: someoneElsePost,
+      result: false,
+    });
+  });
+
+  test('when: "deny" logs only denials, not grants', () => {
+    const denyEvents: { result: boolean }[] = [];
+    const denyCan = createCan<User, typeof roles, typeof actions, Resources, typeof permissions>(
+      permissions,
+      {
+        logger: {
+          onCheck: (event) => {
+            denyEvents.push(event);
+          },
+          when: "deny",
+        },
+      }
+    );
+
+    expect(denyCan(admin, "post:read")).toBe(true); // granted -- should not log
+    expect(denyCan(moderator, "post:update", post("someone-else"))).toBe(false); // denied -- should log
+
+    expect(denyEvents).toHaveLength(1);
+    expect(denyEvents[0]?.result).toBe(false);
+  });
+
+  test("a throwing onCheck doesn't crash or affect a synchronous check's result", () => {
+    const throwingCan = createCan<User, typeof roles, typeof actions, Resources, typeof permissions>(
+      permissions,
+      {
+        logger: {
+          onCheck: () => {
+            throw new Error("boom");
+          },
+        },
+      }
+    );
+
+    expect(throwingCan(admin, "post:read")).toBe(true);
+  });
+
+  test("a rejecting async onCheck doesn't crash or affect a check's result, sync or async", async () => {
+    const rejectingCan = createCan<User, typeof roles, typeof actions, Resources, typeof permissions>(
+      permissions,
+      {
+        logger: {
+          onCheck: async () => {
+            throw new Error("boom-async");
+          },
+        },
+      }
+    );
+
+    expect(rejectingCan(admin, "post:read")).toBe(true); // sync check path
+    await expect(rejectingCan(regularUser, "post:update", post(regularUser.id))).resolves.toBe(true); // async check path
+  });
+
+  test("logs the resolved result of a combinator-derived check", async () => {
+    const events: { result: boolean }[] = [];
+    const ccRoles = ["moderator"] as const;
+    type CCUser = { id: string; name: string; roles: (typeof ccRoles)[number][] };
+    type CCPost = Post & { locked: boolean };
+    type CCResources = { post: { model: CCPost } };
+    type CCPermissions = PermissionsGenerator<CCUser, typeof ccRoles, typeof actions, CCResources>;
+
+    const isLocked = (user: CCUser, post: CCPost) => post.locked;
+
+    const ccPermissions = {
+      moderator: {
+        "post:delete": and(true, not(isLocked)),
+      },
+    } satisfies CCPermissions;
+
+    const ccCan = createCan<CCUser, typeof ccRoles, typeof actions, CCResources, typeof ccPermissions>(
+      ccPermissions,
+      {
+        logger: {
+          onCheck: (event) => {
+            events.push(event);
+          },
+        },
+      }
+    );
+
+    const moderator = { id: "1", name: "Mod", roles: ["moderator"] } satisfies CCUser;
+    const lockedPost: CCPost = { id: "p1", authorID: "999", body: "hi", createdAt: new Date(), locked: true };
+
+    // "post:delete" here resolves through a combinator, so it's Promise<boolean>-typed even
+    // though isLocked is sync -- await handles either shape.
+    expect(await ccCan(moderator, "post:delete", lockedPost)).toBe(false); // locked vetoes the grant
+    expect(events).toHaveLength(1);
+    expect(events[0]?.result).toBe(false);
+  });
+});

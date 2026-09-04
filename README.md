@@ -200,12 +200,13 @@ held role is most permissive wins, regardless of array order.
 
 ### Composing checks
 
-`and`, `or`, and `not` combine existing check values (`boolean | (user, resource) => boolean |
-Promise<boolean>`) into a new one, so a single permission can be built from more than one
-condition — including an explicit deny that overrides a broader grant:
+`and`, `or`, and `not` combine existing check values (exported as `CheckValue<User, Resource>` —
+`boolean | (user, resource) => boolean | Promise<boolean>`) into a new one, so a single permission
+can be built from more than one condition — including an explicit deny that overrides a broader
+grant:
 
 ```ts
-import { and, or, not, type PermissionsGenerator } from "@vicstack/permissions";
+import { createCan, and, or, not, type PermissionsGenerator } from "@vicstack/permissions";
 
 type Post = { id: string; authorID: string; body: string; createdAt: Date; locked: boolean };
 type Resources = { post: { model: Post } };
@@ -222,6 +223,15 @@ const permissions = {
     "post:read": or(isOwner, isPublished),
   },
 } satisfies Permissions;
+
+const can = createCan<User, typeof roles, typeof actions, Resources, typeof permissions>(
+  permissions
+);
+
+const moderator = { id: "1", name: "Mo", roles: ["moderator"] } satisfies User;
+const lockedPost: Post = { id: "p1", authorID: "999", body: "hi", createdAt: new Date(), locked: true };
+
+can(moderator, "post:delete", lockedPost); // false — locked vetoes the grant, even for a moderator
 ```
 
 `and`/`or`/`not` compose (`and(or(a, b), not(c))` is a valid check value), and can be used anywhere
@@ -234,10 +244,44 @@ whenever any composed check *could* be async — TypeScript can't rule that out 
 function's declared return type alone, so a Promise-capable check makes the whole combinator
 Promise-typed.
 
+### Auditing checks
+
+`createCan` takes an optional second argument to log every check `can()` makes — or just the
+denials:
+
+```ts
+const can = createCan<User, typeof roles, typeof actions, Resources, typeof permissions>(
+  permissions,
+  {
+    logger: {
+      onCheck: (event) => {
+        console.log(event.user.id, event.permission, event.result);
+      },
+      when: "deny", // default "always" — logs every check, not just denials
+    },
+  }
+);
+```
+
+`onCheck` receives a `CheckEvent<User>` — `{ user, permission, resource, result }` — and the whole
+options object is typed `CreateCanOptions<User>`, both exported if you want to name them (e.g. to
+type a standalone logger function). `event.user.roles` shows which roles the user held, useful for
+reasoning about why a check was denied. Logging is always fire-and-forget: it never blocks or
+delays `can()`'s own result, and a throwing or rejecting `onCheck` is swallowed rather than
+crashing the check or leaking an unhandled rejection. It reports the aggregate result only, not
+which specific held role's check decided it.
+
 ## Develop
 
 ```bash
 bun install
+bun run typecheck  # type-checks index.ts AND tests/ -- bun test and bun run build don't
 bun test
-bun run build   # emits dist/index.js + dist/index.d.ts
+bun run build       # emits dist/index.js + dist/index.d.ts
 ```
+
+`bun run build` only type-checks `index.ts` (`tsconfig.build.json` scopes to just that file for a
+clean `dist/` output), and `bun test` doesn't type-check at all — it transpiles and runs. A type
+error confined to `tests/permissions.test.ts` can pass both and still be broken, so `bun run
+typecheck` is the one command that actually covers the whole project; `prepublishOnly` runs it
+first for exactly that reason.
