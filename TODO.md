@@ -61,9 +61,14 @@ resource is still deliberately unimplemented.
       instance," not "what's the filter for which posts this user can see" — needed for any list
       endpoint. Likely means check functions can optionally return a query predicate, not just a
       boolean.
-- [ ] **Policy composition (AND/OR, explicit deny).** No way to combine multiple checks or have an
-      explicit deny override an allow from elsewhere. Needed once permissions come from more than
-      one source (e.g. role grant + resource-owner override).
+- [x] **Policy composition (AND/OR, explicit deny).** Shipped as exported `and`/`or`/`not`
+      combinators over the existing check-value shape (`boolean | (user, resource) => boolean |
+      Promise<boolean>`) — not a new table construct, and not a change to multi-role resolution.
+      "Explicit deny" is expressed by composition, `and(grant, not(veto))`, rather than a
+      dedicated primitive. Combinators nest (`and(or(a, b), not(c))` is valid) and share a runtime
+      reduction (`combineChecks` in `index.ts`) with `createCan`'s own multi-role
+      most-permissive-wins resolution — `evaluateAny` was refactored into that shared helper
+      rather than kept as a near-duplicate.
 
 ## Lower priority
 

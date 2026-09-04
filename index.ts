@@ -142,6 +142,72 @@ type DistributeResolve<Perms, A extends keyof Perms, Perm extends string, D exte
 type ResolveCheckForRoleSet<Perms, Rs extends keyof Perms, Perm extends string> =
   Rs extends any ? ResolveCheck<Perms, Rs, Perm> : never;
 
+// the shape of a single permission's check value: a plain boolean, or a function that
+// reads the resource. Exported so callers can type their own reusable check functions,
+// and so `and`/`or`/`not` below can compose them.
+export type CheckValue<User, Resource> =
+  | boolean
+  | ((user: User, resource: Resource) => boolean | Promise<boolean>);
+
+// shared reduction behind `and`/`or` (and behind `createCan`'s own multi-role
+// most-permissive-wins resolution) — "any" short-circuits on a synchronous `true` (OR),
+// "all" short-circuits on a synchronous `false` (AND); either way, only awaits when a
+// still-pending (Promise-returning) check is actually needed to decide the outcome.
+function combineChecks<User, Resource>(
+  checks: CheckValue<User, Resource>[],
+  user: User,
+  resource: Resource,
+  mode: "any" | "all",
+): boolean | Promise<boolean> {
+  const shortCircuit = mode === "any";
+  const pending: Promise<boolean>[] = [];
+  for (const check of checks) {
+    const result = typeof check === "function" ? check(user, resource) : check;
+    if (result === shortCircuit) return shortCircuit;
+    if (result instanceof Promise) pending.push(result as Promise<boolean>);
+  }
+  if (pending.length === 0) return !shortCircuit;
+  return Promise.all(pending).then((settled) =>
+    settled.some((s) => s === shortCircuit) ? shortCircuit : !shortCircuit
+  );
+}
+
+/**
+ * Combines checks with AND: grants only if every check grants. Usable anywhere a check
+ * value is expected, including nested inside another `and`/`or`/`not`. Using a combinator
+ * always makes `can()`'s resource argument required and its return type `Promise<boolean>`
+ * — even if none of the composed checks actually read the resource or are async — since
+ * the composed checks' own arity/async-ness isn't visible at `and`'s call site.
+ */
+export function and<User, Resource>(
+  ...checks: CheckValue<User, Resource>[]
+): (user: User, resource: Resource) => boolean | Promise<boolean> {
+  return (user, resource) => combineChecks(checks, user, resource, "all");
+}
+
+/**
+ * Combines checks with OR: grants if any check grants. Same resource/async-arity tradeoff
+ * as `and` above.
+ */
+export function or<User, Resource>(
+  ...checks: CheckValue<User, Resource>[]
+): (user: User, resource: Resource) => boolean | Promise<boolean> {
+  return (user, resource) => combineChecks(checks, user, resource, "any");
+}
+
+/**
+ * Negates a check — grants exactly when the wrapped check would deny. Compose with `and`
+ * to express "explicit deny": `and(grant, not(veto))`.
+ */
+export function not<User, Resource>(
+  check: CheckValue<User, Resource>
+): (user: User, resource: Resource) => boolean | Promise<boolean> {
+  return (user, resource) => {
+    const result = typeof check === "function" ? check(user, resource) : check;
+    return result instanceof Promise ? result.then((r) => !r) : !result;
+  };
+}
+
 export type PermissionsGenerator<
   User extends { roles: readonly Roles[number][] },
   Roles extends readonly string[],
@@ -249,20 +315,6 @@ export function createCan<
   // true if this specific check value's function returns a Promise
   type IsAsync<T> = T extends (...args: any[]) => infer Ret ? (Ret extends Promise<any> ? true : false) : false;
 
-  // most-permissive-wins: true if ANY candidate check evaluates to true. Short-circuits on
-  // a synchronous true without waiting on the rest; only awaits when a still-pending
-  // (Promise-returning) candidate is needed to decide the outcome.
-  function evaluateAny(checks: Check[], user: User, resource: unknown): boolean | Promise<boolean> {
-    const pending: Promise<boolean>[] = [];
-    for (const check of checks) {
-      const result = typeof check === "function" ? check(user, resource) : check;
-      if (result === true) return true;
-      if (result instanceof Promise) pending.push(result as Promise<boolean>);
-    }
-    if (pending.length === 0) return false;
-    return Promise.all(pending).then((results) => results.some(Boolean));
-  }
-
   return function can<
     R extends readonly Roles[number][],
     Perm extends EffectiveKeysForRoleSet<P, R[number], Actions, Resources>,
@@ -283,7 +335,7 @@ export function createCan<
       if (check !== undefined) checks.push(check);
     }
 
-    return evaluateAny(checks, user, resource) as true extends IsAsync<
+    return combineChecks(checks, user, resource, "any") as true extends IsAsync<
       ResolveCheckForRoleSet<P, R[number], Perm>
     >
       ? Promise<boolean>

@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { createCan, type PermissionsGenerator } from "../index";
+import { createCan, and, or, not, type PermissionsGenerator } from "../index";
 
 const roles = ["admin", "moderator", "user"] as const;
 const actions = ["create", "read", "update", "delete"] as const;
@@ -407,5 +407,85 @@ describe("multiple roles per user", () => {
     // matcher always denies synchronously; only auditor's async ownership check can grant this
     await expect(mrCan(matcherAuditor, "post:read", post(matcherAuditor.id))).resolves.toBe(true);
     await expect(mrCan(matcherAuditor, "post:read", post("someone-else"))).resolves.toBe(false);
+  });
+});
+
+describe("composing checks", () => {
+  type CCPost = Post & { locked: boolean };
+
+  const lockedPost = (authorID: string): CCPost => ({ ...post(authorID), locked: true });
+  const openPost = (authorID: string): CCPost => ({ ...post(authorID), locked: false });
+
+  test("and: grants only when every check grants", () => {
+    const bothTrue = and(true, true);
+    const oneFalse = and(true, false);
+    expect(bothTrue(admin, openPost("x"))).toBe(true);
+    expect(oneFalse(admin, openPost("x"))).toBe(false);
+  });
+
+  test("or: grants when any check grants", () => {
+    const anyTrue = or(false, true);
+    const bothFalse = or(false, false);
+    expect(anyTrue(admin, openPost("x"))).toBe(true);
+    expect(bothFalse(admin, openPost("x"))).toBe(false);
+  });
+
+  test("not: inverts a check", () => {
+    const isLocked = (user: User, post: CCPost) => post.locked;
+    const isOpen = not(isLocked);
+    expect(isOpen(admin, openPost("x"))).toBe(true);
+    expect(isOpen(admin, lockedPost("x"))).toBe(false);
+  });
+
+  test("explicit deny via and(grant, not(veto)): a broad grant is vetoed for a locked resource", () => {
+    const ccRoles = ["moderator"] as const;
+    type CCUser = { id: string; name: string; roles: (typeof ccRoles)[number][] };
+    type CCResources = { post: { model: CCPost } };
+    type CCPermissions = PermissionsGenerator<CCUser, typeof ccRoles, typeof actions, CCResources>;
+
+    const isLocked = (user: CCUser, post: CCPost) => post.locked;
+
+    const ccPermissions = {
+      moderator: {
+        "post:delete": and(true, not(isLocked)), // moderators can delete any post, unless locked
+      },
+    } satisfies CCPermissions;
+
+    const ccCan = createCan<CCUser, typeof ccRoles, typeof actions, CCResources, typeof ccPermissions>(
+      ccPermissions
+    );
+
+    const moderator = { id: "1", name: "Mod", roles: ["moderator"] } satisfies CCUser;
+
+    expect(ccCan(moderator, "post:delete", openPost("999"))).toBe(true);
+    expect(ccCan(moderator, "post:delete", lockedPost("999"))).toBe(false);
+  });
+
+  test("mixes sync and async checks correctly, awaiting only when needed", async () => {
+    const asyncOwnership = async (user: User, post: CCPost) => {
+      await Promise.resolve();
+      return user.id === post.authorID;
+    };
+
+    const anded = and(true, asyncOwnership);
+    const ored = or(false, asyncOwnership);
+
+    await expect(anded(admin, openPost(admin.id))).resolves.toBe(true);
+    await expect(anded(admin, openPost("someone-else"))).resolves.toBe(false);
+    await expect(ored(admin, openPost(admin.id))).resolves.toBe(true);
+    await expect(ored(admin, openPost("someone-else"))).resolves.toBe(false);
+  });
+
+  test("combinators nest: and(or(a, b), not(c))", () => {
+    const isOwner = (user: User, post: CCPost) => user.id === post.authorID;
+    const isAdmin = (user: User, post: CCPost) => user.id === admin.id;
+    const isLocked = (user: User, post: CCPost) => post.locked;
+
+    const check = and(or(isOwner, isAdmin), not(isLocked));
+
+    expect(check(admin, openPost("someone-else"))).toBe(true); // isAdmin true, not locked
+    expect(check(admin, lockedPost("someone-else"))).toBe(false); // locked vetoes it
+    expect(check(regularUser, openPost(regularUser.id))).toBe(true); // isOwner true, not locked
+    expect(check(regularUser, openPost("someone-else"))).toBe(false); // neither owner nor admin
   });
 });

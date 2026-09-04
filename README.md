@@ -198,6 +198,39 @@ can(supportBanned, "post:read");    // true — "support" grants it, "banned" de
 Unlike `extends`'s last-listed-wins precedence, the order of `roles` never matters here — whichever
 held role is most permissive wins, regardless of array order.
 
+### Composing checks
+
+`and`, `or`, and `not` combine existing check values (`boolean | (user, resource) => boolean |
+Promise<boolean>`) into a new one, so a single permission can be built from more than one
+condition — including an explicit deny that overrides a broader grant:
+
+```ts
+import { and, or, not, type PermissionsGenerator } from "@vicstack/permissions";
+
+type Post = { id: string; authorID: string; body: string; createdAt: Date; locked: boolean };
+type Resources = { post: { model: Post } };
+type Permissions = PermissionsGenerator<User, typeof roles, typeof actions, Resources>;
+
+const isOwner = (user: User, post: Post) => user.id === post.authorID;
+const isPublished = (user: User, post: Post) => !post.locked;
+const isLocked = (user: User, post: Post) => post.locked;
+
+const permissions = {
+  moderator: {
+    // moderators can delete any post — unless it's locked, which vetoes the grant
+    "post:delete": and(true, not(isLocked)),
+    "post:read": or(isOwner, isPublished),
+  },
+} satisfies Permissions;
+```
+
+`and`/`or`/`not` compose (`and(or(a, b), not(c))` is a valid check value), and can be used anywhere
+a check value is expected — including as one held role's contribution to multi-role
+most-permissive-wins above. Using a combinator always makes `can()`'s resource argument required
+and its return type `Promise<boolean>`, since the composed checks' own arity and sync/async-ness
+aren't visible at the combinator's call site — safe to `await` either way, even when everything
+actually resolves synchronously.
+
 ## Develop
 
 ```bash
