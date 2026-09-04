@@ -85,9 +85,19 @@ resource is still deliberately unimplemented.
       held, but not which one's check produced `result`; adding that would mean threading
       role/table context through `combineChecks`, which the public `and`/`or` combinators
       that also use it have no need for.
-- [ ] **Framework integration helpers.** Bare function today — no Express/Hono middleware,
-      decorators, or GraphQL directive helpers. Straightforward to add once the core API is stable,
-      not worth building against a moving target.
+- [x] **Framework integration helpers (Hono).** Shipped as a separate workspace package,
+      `@vicstack/adapters-hono` (`packages/adapters/hono`), rather than a subpath export of the
+      core package — this keeps `@vicstack/permissions` itself framework-agnostic and
+      zero-runtime-dependency, and sets up `packages/adapters/*` as the pattern for any future
+      framework adapter to sit alongside as a sibling. Exports `guard(can, permission, options?)`
+      — a middleware factory that 403s on denial by default — and `authorize(c, can, permission,
+      options?)`, a handler-level helper returning a plain boolean for checks too dynamic to guard
+      declaratively at the route level. Both resolve the request's user via `c.get("user")` by
+      default or an `options.getUser` override, and an optional resource via `options.getResource`
+      for resource-scoped permissions (e.g. route-param-driven lookups); `options.onDenied`
+      overrides the default 403 JSON shape. Deliberately still out of scope: Express middleware,
+      decorators, and GraphQL directive helpers — Hono was the one framework this repo actually had
+      an opinion on; the others remain unimplemented, not ruled out.
 
 ## Out of scope
 

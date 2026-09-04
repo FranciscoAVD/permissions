@@ -1,33 +1,14 @@
 {
-  "name": "@vicstack/permissions",
-  "version": "3.3.0",
-  "description": "Type-safe, role-based permission checking generated from your own User/Roles/Actions/Resources types.",
-  "license": "MIT",
-  "type": "module",
-  "sideEffects": false,
-  "publishConfig": {
-    "access": "public"
-  },
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
-  },
-  "files": [
-    "dist"
+  "name": "permissions-workspace",
+  "private": true,
+  "workspaces": [
+    "packages/core",
+    "packages/adapters/*"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "test": "bun test",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prepublishOnly": "bun run typecheck && bun run test && bun run build"
-  },
-  "devDependencies": {
-    "@types/bun": "latest",
-    "typescript": "^7"
+    "build": "bun run --cwd packages/core build && bun run --cwd packages/adapters/hono build",
+    "typecheck": "bun run --cwd packages/core typecheck && bun run --cwd packages/adapters/hono typecheck",
+    "test": "bun run --cwd packages/core test && bun run --cwd packages/adapters/hono test",
+    "prepublishOnly": "bun run build && bun run typecheck && bun run test"
   }
 }
