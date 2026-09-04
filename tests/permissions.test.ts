@@ -7,7 +7,7 @@ const actions = ["create", "read", "update", "delete"] as const;
 type User = {
   id: string;
   name: string;
-  role: (typeof roles)[number];
+  roles: (typeof roles)[number][];
 };
 
 type Post = {
@@ -48,9 +48,9 @@ const can = createCan<User, typeof roles, typeof actions, Resources, typeof perm
   permissions
 );
 
-const admin = { id: "1", name: "Admin", role: "admin" } satisfies User;
-const moderator = { id: "2", name: "Mod", role: "moderator" } satisfies User;
-const regularUser = { id: "3", name: "User", role: "user" } satisfies User;
+const admin = { id: "1", name: "Admin", roles: ["admin"] } satisfies User;
+const moderator = { id: "2", name: "Mod", roles: ["moderator"] } satisfies User;
+const regularUser = { id: "3", name: "User", roles: ["user"] } satisfies User;
 
 const post = (authorID: string): Post => ({
   id: "p1",
@@ -90,7 +90,7 @@ describe("createCan", () => {
 
 describe("wildcard permissions", () => {
   const wcRoles = ["superadmin", "editor", "owner", "guest"] as const;
-  type WCUser = { id: string; name: string; role: (typeof wcRoles)[number] };
+  type WCUser = { id: string; name: string; roles: (typeof wcRoles)[number][] };
   type WCPermissions = PermissionsGenerator<WCUser, typeof wcRoles, typeof actions, Resources>;
 
   const wcPermissions = {
@@ -104,10 +104,10 @@ describe("wildcard permissions", () => {
     wcPermissions
   );
 
-  const superadmin = { id: "1", name: "Super", role: "superadmin" } satisfies WCUser;
-  const editor = { id: "2", name: "Editor", role: "editor" } satisfies WCUser;
-  const owner = { id: "3", name: "Owner", role: "owner" } satisfies WCUser;
-  const guest = { id: "4", name: "Guest", role: "guest" } satisfies WCUser;
+  const superadmin = { id: "1", name: "Super", roles: ["superadmin"] } satisfies WCUser;
+  const editor = { id: "2", name: "Editor", roles: ["editor"] } satisfies WCUser;
+  const owner = { id: "3", name: "Owner", roles: ["owner"] } satisfies WCUser;
+  const guest = { id: "4", name: "Guest", roles: ["guest"] } satisfies WCUser;
 
   test("a role declaring only a wildcard can be asked about every action on that resource, no resource needed", () => {
     expect(wcCan(superadmin, "post:create")).toBe(true);
@@ -147,7 +147,7 @@ describe("wildcard permissions", () => {
 describe("role hierarchy", () => {
   test("inheritance is transitive across a chain, and an ungranted permission is still a compile error", () => {
     const hRoles = ["viewer", "contributor", "manager"] as const;
-    type HUser = { id: string; name: string; role: (typeof hRoles)[number] };
+    type HUser = { id: string; name: string; roles: (typeof hRoles)[number][] };
     type HPermissions = PermissionsGenerator<HUser, typeof hRoles, typeof actions, Resources>;
 
     const hPermissions = {
@@ -168,7 +168,7 @@ describe("role hierarchy", () => {
       hPermissions
     );
 
-    const manager = { id: "1", name: "Manager", role: "manager" } satisfies HUser;
+    const manager = { id: "1", name: "Manager", roles: ["manager"] } satisfies HUser;
 
     expect(hCan(manager, "post:read")).toBe(true); // inherited transitively from viewer
     expect(hCan(manager, "post:create")).toBe(true); // inherited from contributor
@@ -180,7 +180,7 @@ describe("role hierarchy", () => {
 
   test("a child can override one inherited action while the rest still falls through", () => {
     const hRoles = ["base", "restricted"] as const;
-    type HUser = { id: string; name: string; role: (typeof hRoles)[number] };
+    type HUser = { id: string; name: string; roles: (typeof hRoles)[number][] };
     type HPermissions = PermissionsGenerator<HUser, typeof hRoles, typeof actions, Resources>;
 
     const hPermissions = {
@@ -198,7 +198,7 @@ describe("role hierarchy", () => {
       hPermissions
     );
 
-    const restricted = { id: "1", name: "Restricted", role: "restricted" } satisfies HUser;
+    const restricted = { id: "1", name: "Restricted", roles: ["restricted"] } satisfies HUser;
 
     expect(hCan(restricted, "post:create")).toBe(true); // still inherited from base
     expect(hCan(restricted, "post:delete")).toBe(false); // restricted's own override wins
@@ -206,7 +206,7 @@ describe("role hierarchy", () => {
 
   test("a wildcard inherits transitively through a chain with no re-declaration in between", () => {
     const hRoles = ["root", "mid", "leaf"] as const;
-    type HUser = { id: string; name: string; role: (typeof hRoles)[number] };
+    type HUser = { id: string; name: string; roles: (typeof hRoles)[number][] };
     type HPermissions = PermissionsGenerator<HUser, typeof hRoles, typeof actions, Resources>;
 
     const hPermissions = {
@@ -225,7 +225,7 @@ describe("role hierarchy", () => {
       hPermissions
     );
 
-    const leaf = { id: "1", name: "Leaf", role: "leaf" } satisfies HUser;
+    const leaf = { id: "1", name: "Leaf", roles: ["leaf"] } satisfies HUser;
 
     expect(hCan(leaf, "post:create")).toBe(true);
     expect(hCan(leaf, "post:read")).toBe(true);
@@ -235,7 +235,7 @@ describe("role hierarchy", () => {
 
   test("with multiple parents, a later entry in extends overrides an earlier one on the same key", () => {
     const hRoles = ["teamA", "teamB", "combined"] as const;
-    type HUser = { id: string; name: string; role: (typeof hRoles)[number] };
+    type HUser = { id: string; name: string; roles: (typeof hRoles)[number][] };
     type HPermissions = PermissionsGenerator<HUser, typeof hRoles, typeof actions, Resources>;
 
     const hPermissions = {
@@ -254,14 +254,14 @@ describe("role hierarchy", () => {
       hPermissions
     );
 
-    const combined = { id: "1", name: "Combined", role: "combined" } satisfies HUser;
+    const combined = { id: "1", name: "Combined", roles: ["combined"] } satisfies HUser;
 
     expect(hCan(combined, "post:update")).toBe(false); // teamB (last-listed) wins over teamA
   });
 
   test("a role's own key beats every parent regardless of extends order", () => {
     const hRoles = ["teamA", "teamB", "combined"] as const;
-    type HUser = { id: string; name: string; role: (typeof hRoles)[number] };
+    type HUser = { id: string; name: string; roles: (typeof hRoles)[number][] };
     type HPermissions = PermissionsGenerator<HUser, typeof hRoles, typeof actions, Resources>;
 
     const hPermissions = {
@@ -281,14 +281,14 @@ describe("role hierarchy", () => {
       hPermissions
     );
 
-    const combined = { id: "1", name: "Combined", role: "combined" } satisfies HUser;
+    const combined = { id: "1", name: "Combined", roles: ["combined"] } satisfies HUser;
 
     expect(hCan(combined, "post:update")).toBe(false); // own declared value always wins
   });
 
   test("a cyclic extends graph throws at createCan() construction time", () => {
     const hRoles = ["a", "b"] as const;
-    type HUser = { id: string; name: string; role: (typeof hRoles)[number] };
+    type HUser = { id: string; name: string; roles: (typeof hRoles)[number][] };
     type HPermissions = PermissionsGenerator<HUser, typeof hRoles, typeof actions, Resources>;
 
     const hPermissions = {
@@ -310,7 +310,7 @@ describe("role hierarchy", () => {
 
 describe("per-resource action sets", () => {
   const prRoles = ["admin", "editor"] as const;
-  type PRUser = { id: string; name: string; role: (typeof prRoles)[number] };
+  type PRUser = { id: string; name: string; roles: (typeof prRoles)[number][] };
 
   type Comment = {
     id: string;
@@ -341,8 +341,8 @@ describe("per-resource action sets", () => {
     prPermissions
   );
 
-  const admin = { id: "1", name: "Admin", role: "admin" } satisfies PRUser;
-  const editor = { id: "2", name: "Editor", role: "editor" } satisfies PRUser;
+  const admin = { id: "1", name: "Admin", roles: ["admin"] } satisfies PRUser;
+  const editor = { id: "2", name: "Editor", roles: ["editor"] } satisfies PRUser;
 
   test("a resource-specific action can be granted and checked like any other", () => {
     expect(prCan(editor, "post:publish", post(editor.id))).toBe(true);
@@ -358,5 +358,54 @@ describe("per-resource action sets", () => {
     expect(prCan(editor, "comment:read")).toBe(true);
     // @ts-expect-error "publish" is a post-only action, not a valid comment action
     prCan(editor, "comment:publish");
+  });
+});
+
+describe("multiple roles per user", () => {
+  const mrRoles = ["support", "billing", "banned", "matcher", "auditor"] as const;
+  type MRUser = { id: string; name: string; roles: (typeof mrRoles)[number][] };
+  type MRPermissions = PermissionsGenerator<MRUser, typeof mrRoles, typeof actions, Resources>;
+
+  const mrPermissions = {
+    support: { "post:read": true },
+    billing: { "post:update": true },
+    banned: { "post:read": false },
+    matcher: { "post:read": false }, // always denies on its own
+    auditor: {
+      "post:read": async (user, post) => {
+        await Promise.resolve();
+        return user.id === post.authorID;
+      },
+    },
+  } satisfies MRPermissions;
+
+  const mrCan = createCan<MRUser, typeof mrRoles, typeof actions, Resources, typeof mrPermissions>(
+    mrPermissions
+  );
+
+  test("a user holding two disjoint roles gets the union of both", () => {
+    const supportBilling = { id: "1", name: "SB", roles: ["support", "billing"] } satisfies MRUser;
+    expect(mrCan(supportBilling, "post:read")).toBe(true);
+    expect(mrCan(supportBilling, "post:update")).toBe(true);
+  });
+
+  test("most-permissive-wins: any held role granting it is enough, regardless of array order", () => {
+    const supportBanned = { id: "2", name: "SBn", roles: ["support", "banned"] } satisfies MRUser;
+    const bannedSupport = { id: "2", name: "SBn", roles: ["banned", "support"] } satisfies MRUser;
+    expect(mrCan(supportBanned, "post:read")).toBe(true); // support:true beats banned:false
+    expect(mrCan(bannedSupport, "post:read")).toBe(true); // order doesn't matter
+  });
+
+  test("a permission no held role declares is still a compile error", () => {
+    const supportOnly = { id: "3", name: "S", roles: ["support"] } satisfies MRUser;
+    // @ts-expect-error "support" never declared "post:update", and holds no other role that does
+    mrCan(supportOnly, "post:update");
+  });
+
+  test("awaits a still-pending role's async check when no other held role already settled it true", async () => {
+    const matcherAuditor = { id: "4", name: "MA", roles: ["matcher", "auditor"] } satisfies MRUser;
+    // matcher always denies synchronously; only auditor's async ownership check can grant this
+    await expect(mrCan(matcherAuditor, "post:read", post(matcherAuditor.id))).resolves.toBe(true);
+    await expect(mrCan(matcherAuditor, "post:read", post("someone-else"))).resolves.toBe(false);
   });
 });

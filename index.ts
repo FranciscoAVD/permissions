@@ -82,6 +82,19 @@ type DistributeEffectiveKeys<
   Resources extends Record<string, any>,
 > = Rs extends any ? Expand<DeclaredKeys<Perms[Rs]>, Actions, Resources> : never;
 
+// every concrete permission askable by a user holding more than one role at once: the
+// union of each directly-held role's own `EffectiveKeys` (which already includes that
+// role's `extends` ancestors). A separate, independent distribution from the one inside
+// `EffectiveKeys` above — this fans out over "which roles does the user hold," not "which
+// ancestors does one role have." `Rs` must be naked here for the same reason documented
+// above `Expand`.
+type EffectiveKeysForRoleSet<
+  Perms,
+  Rs extends keyof Perms,
+  Actions extends readonly string[],
+  Resources extends Record<string, any>,
+> = Rs extends any ? EffectiveKeys<Perms, Rs, Actions, Resources> : never;
+
 // resolves a role's OWN check for a permission only — exact key, falling back to the
 // role's own wildcard. Does not look at ancestors. `never` if the role itself declares
 // neither (not even via its own wildcard).
@@ -120,8 +133,17 @@ type ResolveCheck<Perms, R extends keyof Perms, Perm extends string, D extends n
 type DistributeResolve<Perms, A extends keyof Perms, Perm extends string, D extends number> =
   A extends any ? ResolveCheck<Perms, A, Perm, D> : never;
 
+// every resolved check across a set of directly-held roles for one concrete permission —
+// most-permissive-wins is implemented at runtime (see `evaluateAny` in `createCan`) as a
+// logical OR over exactly these candidates. Only roles that actually resolve `Perm` (via
+// `ResolveCheck`, itself already honoring that role's own `extends` chain) contribute a
+// candidate; a role that doesn't declare it contributes `never`, which vanishes from the
+// union.
+type ResolveCheckForRoleSet<Perms, Rs extends keyof Perms, Perm extends string> =
+  Rs extends any ? ResolveCheck<Perms, Rs, Perm> : never;
+
 export type PermissionsGenerator<
-  User extends { role: Roles[number] },
+  User extends { roles: readonly Roles[number][] },
   Roles extends readonly string[],
   Actions extends readonly string[],
   Resources extends Record<string, { model: any; actions?: string }>,
@@ -138,8 +160,8 @@ export type PermissionsGenerator<
 };
 
 /**
-* Caller's `user` must keep a literal `role` (e.g. `satisfies User`, not `: User`) or
-* `can` can't narrow which role's permissions apply. A role can only be asked about a
+* Caller's `user` must keep a literal `roles` array (e.g. `satisfies User`, not `: User`)
+* or `can` can't narrow which roles' permissions apply. A role can only be asked about a
 * permission it actually declared, or that an ancestor listed in its `extends` declared
 * — anything else is a compile error, not an implicit deny. A role may declare a
 * `"resource:*"` wildcard to cover every action on that resource in one entry; a more
@@ -150,9 +172,13 @@ export type PermissionsGenerator<
 * may declare an `actions` union (alongside its required `model`) for actions specific to
 * that one resource — additive to the global `Actions` union, invisible to every other
 * resource's keys, and included in that resource's own `"resource:*"` wildcard expansion.
+* `User.roles` is always an array — a user can hold more than one role at once, and a
+* permission is grantable if ANY held role (or its `extends` ancestors) grants it:
+* most-permissive-wins, a logical OR across every held role's resolved check, not an
+* override.
 */
 export function createCan<
-  User extends { role: Roles[number] },
+  User extends { roles: readonly Roles[number][] },
   Roles extends readonly string[],
   Actions extends readonly string[],
   Resources extends Record<string, any>,
@@ -223,20 +249,44 @@ export function createCan<
   // true if this specific check value's function returns a Promise
   type IsAsync<T> = T extends (...args: any[]) => infer Ret ? (Ret extends Promise<any> ? true : false) : false;
 
-  return function can<R extends Roles[number], Perm extends EffectiveKeys<P, R, Actions, Resources>>(
-    user: User & { role: R },
+  // most-permissive-wins: true if ANY candidate check evaluates to true. Short-circuits on
+  // a synchronous true without waiting on the rest; only awaits when a still-pending
+  // (Promise-returning) candidate is needed to decide the outcome.
+  function evaluateAny(checks: Check[], user: User, resource: unknown): boolean | Promise<boolean> {
+    const pending: Promise<boolean>[] = [];
+    for (const check of checks) {
+      const result = typeof check === "function" ? check(user, resource) : check;
+      if (result === true) return true;
+      if (result instanceof Promise) pending.push(result as Promise<boolean>);
+    }
+    if (pending.length === 0) return false;
+    return Promise.all(pending).then((results) => results.some(Boolean));
+  }
+
+  return function can<
+    R extends readonly Roles[number][],
+    Perm extends EffectiveKeysForRoleSet<P, R[number], Actions, Resources>,
+  >(
+    user: User & { roles: R },
     permission: Perm,
-    ...args: ParamCount<ResolveCheck<P, R, Perm>> extends 2
+    ...args: ParamCount<ResolveCheckForRoleSet<P, R[number], Perm>> extends 2
       ? [resource: ResourceOf<Perm, Resources>]
       : [resource?: ResourceOf<Perm, Resources>]
-  ): true extends IsAsync<ResolveCheck<P, R, Perm>> ? Promise<boolean> : boolean {
+  ): true extends IsAsync<ResolveCheckForRoleSet<P, R[number], Perm>> ? Promise<boolean> : boolean {
     const [resource] = args as [ResourceOf<Perm, Resources>?];
-    const table = resolved.get(user.role)!;
     const [resourceKey] = (permission as string).split(":");
-    const check = permission in table ? table[permission] : table[`${resourceKey}:*`];
 
-    const result = typeof check === "function" ? check(user, resource) : check;
+    const checks: Check[] = [];
+    for (const role of user.roles) {
+      const table = resolved.get(role)!;
+      const check = permission in table ? table[permission] : table[`${resourceKey}:*`];
+      if (check !== undefined) checks.push(check);
+    }
 
-    return result as true extends IsAsync<ResolveCheck<P, R, Perm>> ? Promise<boolean> : boolean;
+    return evaluateAny(checks, user, resource) as true extends IsAsync<
+      ResolveCheckForRoleSet<P, R[number], Perm>
+    >
+      ? Promise<boolean>
+      : boolean;
   };
 }

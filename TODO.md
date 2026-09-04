@@ -29,12 +29,14 @@ resource is still deliberately unimplemented.
       `createCan()` construction time, not silently allowed. Deliberately still out of scope:
       multiple roles *per user* (see below) — this only lets one role inherit from another at
       the type/permissions-table level.
-- [ ] **Multiple roles per user.** A user still has exactly one literal `role` — there's no
-      `roles: Role[]` on `User` for a user who genuinely holds more than one role at once (as
-      opposed to one role inheriting another's grants, shipped above via role hierarchy). Would
-      need `can()` to check across every role a user holds, raising the same "which check wins on
-      conflict" question role hierarchy just answered, but for a set of roles picked per-user at
-      runtime instead of a fixed graph declared per-role at the type level.
+- [x] **Multiple roles per user.** `User.role: Roles[number]` is now `User.roles: Roles[number][]`
+      — always an array, even for one role (breaking change, mirroring how `extends` was already
+      "always an array"). A user can hold more than one role at once (distinct from role
+      hierarchy above, which is a fixed graph declared per-role in the table, not a set chosen
+      per-user at runtime). Conflict policy: most-permissive-wins — a permission is grantable if
+      *any* held role (or that role's own `extends` ancestors) grants it, a plain logical OR
+      across every held role's resolved check, with no dependence on array order (unlike
+      `extends`'s last-listed-wins).
 - [x] **Wildcard / default fallback (resource-scoped).** v2.1.0 added a `"resource:*"` key
       meaning "every action on this resource," resolved with most-specific-wins precedence
       against `"resource:action"` keys — so "allow everything except X" now falls directly

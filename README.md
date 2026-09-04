@@ -16,7 +16,7 @@ import { createCan, type PermissionsGenerator } from "@vicstack/permissions";
 const roles = ["admin", "moderator", "user"] as const;
 const actions = ["create", "read", "update", "delete"] as const;
 
-type User = { id: string; name: string; role: (typeof roles)[number] };
+type User = { id: string; name: string; roles: (typeof roles)[number][] };
 type Post = { id: string; authorID: string; body: string; createdAt: Date };
 type Resources = { post: { model: Post } };
 
@@ -44,9 +44,9 @@ const can = createCan<User, typeof roles, typeof actions, Resources, typeof perm
   permissions
 );
 
-// user must keep a literal `role` (satisfies User, not : User) so `can`
-// knows which role's permissions apply
-const user = { id: "1", name: "Ada", role: "user" } satisfies User;
+// user must keep a literal `roles` array (satisfies User, not : User) so `can`
+// knows which roles' permissions apply
+const user = { id: "1", name: "Ada", roles: ["user"] } satisfies User;
 
 const ownPost: Post = { id: "p1", authorID: "1", body: "hi", createdAt: new Date() };
 const othersPost: Post = { id: "p2", authorID: "999", body: "hi", createdAt: new Date() };
@@ -112,8 +112,8 @@ const can = createCan<User, typeof roles, typeof actions, Resources, typeof perm
   permissions
 );
 
-const adminUser = { id: "1", name: "Ada", role: "admin" } satisfies User;
-const modUser = { id: "2", name: "Bo", role: "moderator" } satisfies User;
+const adminUser = { id: "1", name: "Ada", roles: ["admin"] } satisfies User;
+const modUser = { id: "2", name: "Bo", roles: ["moderator"] } satisfies User;
 const modsPost: Post = { id: "p1", authorID: "2", body: "hi", createdAt: new Date() };
 
 can(adminUser, "post:publish");            // true — covered by "post:*"
@@ -165,6 +165,38 @@ const permissions = {
 
 can(combined, "post:update"); // false — teamB (last-listed) overrides teamA
 ```
+
+### Multiple roles per user
+
+`User.roles` is always an array — a user can hold more than one role at once. This is distinct
+from role hierarchy above: `extends` is a fixed graph declared per role in the permissions table,
+while `roles` is the set of roles a specific user happens to hold, chosen at runtime. A permission
+is grantable if **any** held role (or that role's own `extends` ancestors) grants it —
+most-permissive-wins, a logical OR, not an override:
+
+```ts
+const permissions = {
+  support: {
+    "post:read": true,
+  },
+  billing: {
+    "post:update": true,
+  },
+  banned: {
+    "post:read": false,
+  },
+} satisfies Permissions;
+
+const supportBilling = { id: "1", name: "Cam", roles: ["support", "billing"] } satisfies User;
+const supportBanned = { id: "2", name: "Dee", roles: ["support", "banned"] } satisfies User;
+
+can(supportBilling, "post:read");   // true — from "support"
+can(supportBilling, "post:update"); // true — from "billing"
+can(supportBanned, "post:read");    // true — "support" grants it, "banned" denying it doesn't matter
+```
+
+Unlike `extends`'s last-listed-wins precedence, the order of `roles` never matters here — whichever
+held role is most permissive wins, regardless of array order.
 
 ## Develop
 
