@@ -8,8 +8,8 @@ const actions = ["create", "read", "update"] as const;
 
 type User = { id: string; name: string; roles: (typeof roles)[number][] };
 type Post = { id: string; authorID: string };
-type Resources = { post: { model: Post } };
-type Permissions = PermissionsGenerator<User, typeof roles, typeof actions, Resources>;
+type Resources = { post: { model: Post; actions: typeof actions } };
+type Permissions = PermissionsGenerator<User, typeof roles, Resources>;
 
 const permissions = {
   admin: {
@@ -23,7 +23,7 @@ const permissions = {
   },
 } satisfies Permissions;
 
-const can = createCan<User, typeof roles, typeof actions, Resources, typeof permissions>(
+const can = createCan<User, typeof roles, Resources, typeof permissions>(
   permissions,
 );
 
@@ -35,12 +35,11 @@ const asyncPermissions = {
       return u.name === "eligible";
     },
   },
-} satisfies PermissionsGenerator<User, typeof roles, typeof actions, Resources>;
+} satisfies PermissionsGenerator<User, typeof roles, Resources>;
 
 const asyncCan = createCan<
   User,
   typeof roles,
-  typeof actions,
   Resources,
   typeof asyncPermissions
 >(asyncPermissions);

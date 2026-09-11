@@ -18,10 +18,10 @@ type Post = {
 };
 
 type Resources = {
-  post: { model: Post };
+  post: { model: Post; actions: typeof actions };
 };
 
-type Permissions = PermissionsGenerator<User, typeof roles, typeof actions, Resources>;
+type Permissions = PermissionsGenerator<User, typeof roles, Resources>;
 
 const permissions = {
   admin: {
@@ -44,7 +44,7 @@ const permissions = {
   },
 } satisfies Permissions;
 
-const can = createCan<User, typeof roles, typeof actions, Resources, typeof permissions>(
+const can = createCan<User, typeof roles, Resources, typeof permissions>(
   permissions
 );
 
@@ -91,7 +91,7 @@ describe("createCan", () => {
 describe("wildcard permissions", () => {
   const wcRoles = ["superadmin", "editor", "owner", "guest"] as const;
   type WCUser = { id: string; name: string; roles: (typeof wcRoles)[number][] };
-  type WCPermissions = PermissionsGenerator<WCUser, typeof wcRoles, typeof actions, Resources>;
+  type WCPermissions = PermissionsGenerator<WCUser, typeof wcRoles, Resources>;
 
   const wcPermissions = {
     superadmin: { "post:*": true },
@@ -100,7 +100,7 @@ describe("wildcard permissions", () => {
     guest: { "post:read": true },
   } satisfies WCPermissions;
 
-  const wcCan = createCan<WCUser, typeof wcRoles, typeof actions, Resources, typeof wcPermissions>(
+  const wcCan = createCan<WCUser, typeof wcRoles, Resources, typeof wcPermissions>(
     wcPermissions
   );
 
@@ -148,7 +148,7 @@ describe("role hierarchy", () => {
   test("inheritance is transitive across a chain, and an ungranted permission is still a compile error", () => {
     const hRoles = ["viewer", "contributor", "manager"] as const;
     type HUser = { id: string; name: string; roles: (typeof hRoles)[number][] };
-    type HPermissions = PermissionsGenerator<HUser, typeof hRoles, typeof actions, Resources>;
+    type HPermissions = PermissionsGenerator<HUser, typeof hRoles, Resources>;
 
     const hPermissions = {
       viewer: {
@@ -164,7 +164,7 @@ describe("role hierarchy", () => {
       },
     } satisfies HPermissions;
 
-    const hCan = createCan<HUser, typeof hRoles, typeof actions, Resources, typeof hPermissions>(
+    const hCan = createCan<HUser, typeof hRoles, Resources, typeof hPermissions>(
       hPermissions
     );
 
@@ -181,7 +181,7 @@ describe("role hierarchy", () => {
   test("a child can override one inherited action while the rest still falls through", () => {
     const hRoles = ["base", "restricted"] as const;
     type HUser = { id: string; name: string; roles: (typeof hRoles)[number][] };
-    type HPermissions = PermissionsGenerator<HUser, typeof hRoles, typeof actions, Resources>;
+    type HPermissions = PermissionsGenerator<HUser, typeof hRoles, Resources>;
 
     const hPermissions = {
       base: {
@@ -194,7 +194,7 @@ describe("role hierarchy", () => {
       },
     } satisfies HPermissions;
 
-    const hCan = createCan<HUser, typeof hRoles, typeof actions, Resources, typeof hPermissions>(
+    const hCan = createCan<HUser, typeof hRoles, Resources, typeof hPermissions>(
       hPermissions
     );
 
@@ -207,7 +207,7 @@ describe("role hierarchy", () => {
   test("a wildcard inherits transitively through a chain with no re-declaration in between", () => {
     const hRoles = ["root", "mid", "leaf"] as const;
     type HUser = { id: string; name: string; roles: (typeof hRoles)[number][] };
-    type HPermissions = PermissionsGenerator<HUser, typeof hRoles, typeof actions, Resources>;
+    type HPermissions = PermissionsGenerator<HUser, typeof hRoles, Resources>;
 
     const hPermissions = {
       root: {
@@ -221,7 +221,7 @@ describe("role hierarchy", () => {
       },
     } satisfies HPermissions;
 
-    const hCan = createCan<HUser, typeof hRoles, typeof actions, Resources, typeof hPermissions>(
+    const hCan = createCan<HUser, typeof hRoles, Resources, typeof hPermissions>(
       hPermissions
     );
 
@@ -236,7 +236,7 @@ describe("role hierarchy", () => {
   test("with multiple parents, a later entry in extends overrides an earlier one on the same key", () => {
     const hRoles = ["teamA", "teamB", "combined"] as const;
     type HUser = { id: string; name: string; roles: (typeof hRoles)[number][] };
-    type HPermissions = PermissionsGenerator<HUser, typeof hRoles, typeof actions, Resources>;
+    type HPermissions = PermissionsGenerator<HUser, typeof hRoles, Resources>;
 
     const hPermissions = {
       teamA: {
@@ -250,7 +250,7 @@ describe("role hierarchy", () => {
       },
     } satisfies HPermissions;
 
-    const hCan = createCan<HUser, typeof hRoles, typeof actions, Resources, typeof hPermissions>(
+    const hCan = createCan<HUser, typeof hRoles, Resources, typeof hPermissions>(
       hPermissions
     );
 
@@ -262,7 +262,7 @@ describe("role hierarchy", () => {
   test("a role's own key beats every parent regardless of extends order", () => {
     const hRoles = ["teamA", "teamB", "combined"] as const;
     type HUser = { id: string; name: string; roles: (typeof hRoles)[number][] };
-    type HPermissions = PermissionsGenerator<HUser, typeof hRoles, typeof actions, Resources>;
+    type HPermissions = PermissionsGenerator<HUser, typeof hRoles, Resources>;
 
     const hPermissions = {
       teamA: {
@@ -277,7 +277,7 @@ describe("role hierarchy", () => {
       },
     } satisfies HPermissions;
 
-    const hCan = createCan<HUser, typeof hRoles, typeof actions, Resources, typeof hPermissions>(
+    const hCan = createCan<HUser, typeof hRoles, Resources, typeof hPermissions>(
       hPermissions
     );
 
@@ -289,7 +289,7 @@ describe("role hierarchy", () => {
   test("a cyclic extends graph throws at createCan() construction time", () => {
     const hRoles = ["a", "b"] as const;
     type HUser = { id: string; name: string; roles: (typeof hRoles)[number][] };
-    type HPermissions = PermissionsGenerator<HUser, typeof hRoles, typeof actions, Resources>;
+    type HPermissions = PermissionsGenerator<HUser, typeof hRoles, Resources>;
 
     const hPermissions = {
       a: {
@@ -303,7 +303,7 @@ describe("role hierarchy", () => {
     } satisfies HPermissions;
 
     expect(() => {
-      createCan<HUser, typeof hRoles, typeof actions, Resources, typeof hPermissions>(hPermissions);
+      createCan<HUser, typeof hRoles, Resources, typeof hPermissions>(hPermissions);
     }).toThrow();
   });
 });
@@ -319,16 +319,20 @@ describe("per-resource action sets", () => {
     body: string;
   };
 
+  // each resource declares its own full action list — there's no global set to merge
+  // into. `post` reuses the shared `actions` base plus two extras of its own (the
+  // recommended convention for resources that want a common baseline); `comment`
+  // declares its own, deliberately smaller, unrelated list.
   type PRResources = {
-    post: { model: Post; actions: "publish" | "archive" };
-    comment: { model: Comment };
+    post: { model: Post; actions: readonly [...typeof actions, "publish", "archive"] };
+    comment: { model: Comment; actions: readonly ["read"] };
   };
 
-  type PRPermissions = PermissionsGenerator<PRUser, typeof prRoles, typeof actions, PRResources>;
+  type PRPermissions = PermissionsGenerator<PRUser, typeof prRoles, PRResources>;
 
   const prPermissions = {
     admin: {
-      "post:*": true, // wildcard covers "publish"/"archive" too, not just the global actions
+      "post:*": true, // wildcard covers "publish"/"archive" too -- post's whole action list
     },
     editor: {
       "post:read": true,
@@ -337,7 +341,7 @@ describe("per-resource action sets", () => {
     },
   } satisfies PRPermissions;
 
-  const prCan = createCan<PRUser, typeof prRoles, typeof actions, PRResources, typeof prPermissions>(
+  const prCan = createCan<PRUser, typeof prRoles, PRResources, typeof prPermissions>(
     prPermissions
   );
 
@@ -349,14 +353,14 @@ describe("per-resource action sets", () => {
     expect(prCan(editor, "post:publish", post("someone-else"))).toBe(false);
   });
 
-  test("a wildcard on the resource covers its extra actions too", () => {
+  test("a wildcard on the resource covers its whole action list, not just the shared base", () => {
     expect(prCan(admin, "post:publish")).toBe(true);
     expect(prCan(admin, "post:archive")).toBe(true);
   });
 
-  test("a resource-specific action doesn't leak into other resources' key space", () => {
+  test("a resource's own action list doesn't leak into another resource's key space", () => {
     expect(prCan(editor, "comment:read")).toBe(true);
-    // @ts-expect-error "publish" is a post-only action, not a valid comment action
+    // @ts-expect-error "publish" isn't in comment's own (smaller) action list
     prCan(editor, "comment:publish");
   });
 });
@@ -364,7 +368,7 @@ describe("per-resource action sets", () => {
 describe("multiple roles per user", () => {
   const mrRoles = ["support", "billing", "banned", "matcher", "auditor"] as const;
   type MRUser = { id: string; name: string; roles: (typeof mrRoles)[number][] };
-  type MRPermissions = PermissionsGenerator<MRUser, typeof mrRoles, typeof actions, Resources>;
+  type MRPermissions = PermissionsGenerator<MRUser, typeof mrRoles, Resources>;
 
   const mrPermissions = {
     support: { "post:read": true },
@@ -379,7 +383,7 @@ describe("multiple roles per user", () => {
     },
   } satisfies MRPermissions;
 
-  const mrCan = createCan<MRUser, typeof mrRoles, typeof actions, Resources, typeof mrPermissions>(
+  const mrCan = createCan<MRUser, typeof mrRoles, Resources, typeof mrPermissions>(
     mrPermissions
   );
 
@@ -456,8 +460,8 @@ describe("composing checks", () => {
   test("explicit deny via and(grant, not(veto)): a broad grant is vetoed for a locked resource", async () => {
     const ccRoles = ["moderator"] as const;
     type CCUser = { id: string; name: string; roles: (typeof ccRoles)[number][] };
-    type CCResources = { post: { model: CCPost } };
-    type CCPermissions = PermissionsGenerator<CCUser, typeof ccRoles, typeof actions, CCResources>;
+    type CCResources = { post: { model: CCPost; actions: typeof actions } };
+    type CCPermissions = PermissionsGenerator<CCUser, typeof ccRoles, CCResources>;
 
     const isLocked = (user: CCUser, post: CCPost) => post.locked;
 
@@ -467,7 +471,7 @@ describe("composing checks", () => {
       },
     } satisfies CCPermissions;
 
-    const ccCan = createCan<CCUser, typeof ccRoles, typeof actions, CCResources, typeof ccPermissions>(
+    const ccCan = createCan<CCUser, typeof ccRoles, CCResources, typeof ccPermissions>(
       ccPermissions
     );
 
@@ -514,7 +518,7 @@ describe("composing checks", () => {
 describe("audit logging", () => {
   test("logs every check by default, with the correct event fields", () => {
     const events: { user: User; permission: string; resource: unknown; result: boolean }[] = [];
-    const loggedCan = createCan<User, typeof roles, typeof actions, Resources, typeof permissions>(
+    const loggedCan = createCan<User, typeof roles, Resources, typeof permissions>(
       permissions,
       {
         logger: {
@@ -541,7 +545,7 @@ describe("audit logging", () => {
 
   test('when: "deny" logs only denials, not grants', () => {
     const denyEvents: { result: boolean }[] = [];
-    const denyCan = createCan<User, typeof roles, typeof actions, Resources, typeof permissions>(
+    const denyCan = createCan<User, typeof roles, Resources, typeof permissions>(
       permissions,
       {
         logger: {
@@ -561,7 +565,7 @@ describe("audit logging", () => {
   });
 
   test("a throwing onCheck doesn't crash or affect a synchronous check's result", () => {
-    const throwingCan = createCan<User, typeof roles, typeof actions, Resources, typeof permissions>(
+    const throwingCan = createCan<User, typeof roles, Resources, typeof permissions>(
       permissions,
       {
         logger: {
@@ -576,7 +580,7 @@ describe("audit logging", () => {
   });
 
   test("a rejecting async onCheck doesn't crash or affect a check's result, sync or async", async () => {
-    const rejectingCan = createCan<User, typeof roles, typeof actions, Resources, typeof permissions>(
+    const rejectingCan = createCan<User, typeof roles, Resources, typeof permissions>(
       permissions,
       {
         logger: {
@@ -596,8 +600,8 @@ describe("audit logging", () => {
     const ccRoles = ["moderator"] as const;
     type CCUser = { id: string; name: string; roles: (typeof ccRoles)[number][] };
     type CCPost = Post & { locked: boolean };
-    type CCResources = { post: { model: CCPost } };
-    type CCPermissions = PermissionsGenerator<CCUser, typeof ccRoles, typeof actions, CCResources>;
+    type CCResources = { post: { model: CCPost; actions: typeof actions } };
+    type CCPermissions = PermissionsGenerator<CCUser, typeof ccRoles, CCResources>;
 
     const isLocked = (user: CCUser, post: CCPost) => post.locked;
 
@@ -607,7 +611,7 @@ describe("audit logging", () => {
       },
     } satisfies CCPermissions;
 
-    const ccCan = createCan<CCUser, typeof ccRoles, typeof actions, CCResources, typeof ccPermissions>(
+    const ccCan = createCan<CCUser, typeof ccRoles, CCResources, typeof ccPermissions>(
       ccPermissions,
       {
         logger: {

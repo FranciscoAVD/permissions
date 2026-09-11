@@ -1,6 +1,6 @@
 # permissions
 
-Type-safe, role-based permission checking generated from your own `User`, `Roles`, `Actions`, and `Resources` types. Each role declares exactly the `"resource:action"` permissions it has — nothing more — so asking whether a role can do something it never declared is a compile error, not a runtime `false`.
+Type-safe, role-based permission checking generated from your own `User`, `Roles`, and `Resources` types — each resource declares its own action list directly. Each role declares exactly the `"resource:action"` permissions it has — nothing more — so asking whether a role can do something it never declared is a compile error, not a runtime `false`.
 
 ## Install
 
@@ -18,9 +18,9 @@ const actions = ["create", "read", "update", "delete"] as const;
 
 type User = { id: string; name: string; roles: (typeof roles)[number][] };
 type Post = { id: string; authorID: string; body: string; createdAt: Date };
-type Resources = { post: { model: Post } };
+type Resources = { post: { model: Post; actions: typeof actions } };
 
-type Permissions = PermissionsGenerator<User, typeof roles, typeof actions, Resources>;
+type Permissions = PermissionsGenerator<User, typeof roles, Resources>;
 
 const permissions = {
   admin: {
@@ -40,7 +40,7 @@ const permissions = {
   },
 } satisfies Permissions;
 
-const can = createCan<User, typeof roles, typeof actions, Resources, typeof permissions>(
+const can = createCan<User, typeof roles, Resources, typeof permissions>(
   permissions
 );
 
@@ -82,24 +82,28 @@ can(moderator, "post:create"); // true  — falls back to "post:*"
 
 Only resource-scoped wildcards (`"post:*"`) are supported — a bare `"*"` spanning every resource is not.
 
-### Per-resource actions
+### Sharing actions across resources
 
-`Resources` entries are always `{ model: ... }`, and can optionally add an `actions` union for
-actions that only make sense on that one resource — they're additive to the global `Actions` union
-and don't show up on any other resource's keys:
+Every `Resources` entry declares its own required `actions` list (alongside `model`) — there's no
+global action set shared across resources, so a resource's `"resource:*"` wildcard always expands
+to exactly that resource's own list. If several resources want a common baseline (e.g. every
+resource has `"read"`), define your own reusable type or const array and include it in each
+resource's `actions` yourself — `createCan` doesn't merge or infer shared actions on your behalf:
 
 ```ts
+type BaseActions = "read" | "create" | "update" | "delete";
 type Comment = { id: string; postID: string; authorID: string; body: string };
+
 type Resources = {
-  post: { model: Post; actions: "publish" | "archive" };
-  comment: { model: Comment };
+  post: { model: Post; actions: (BaseActions | "publish" | "archive")[] }; // shares the base, plus its own extras
+  comment: { model: Comment; actions: BaseActions[] }; // just the shared base
 };
 
-type Permissions = PermissionsGenerator<User, typeof roles, typeof actions, Resources>;
+type Permissions = PermissionsGenerator<User, typeof roles, Resources>;
 
 const permissions = {
   admin: {
-    "post:*": true, // wildcard covers "publish" and "archive" too, not just the global actions
+    "post:*": true, // wildcard covers "publish" and "archive" too — post's whole action list
   },
   moderator: {
     "post:read": true,
@@ -108,7 +112,7 @@ const permissions = {
   user: {},
 } satisfies Permissions;
 
-const can = createCan<User, typeof roles, typeof actions, Resources, typeof permissions>(
+const can = createCan<User, typeof roles, Resources, typeof permissions>(
   permissions
 );
 
@@ -118,7 +122,7 @@ const modsPost: Post = { id: "p1", authorID: "2", body: "hi", createdAt: new Dat
 
 can(adminUser, "post:publish");            // true — covered by "post:*"
 can(modUser, "post:publish", modsPost);    // true — modUser.id ("2") matches modsPost.authorID
-can(modUser, "comment:publish");           // compile error — "publish" isn't a comment action
+can(modUser, "comment:publish");           // compile error — "publish" isn't in comment's own actions
 ```
 
 ### Role hierarchy
@@ -209,8 +213,8 @@ grant:
 import { createCan, and, or, not, type PermissionsGenerator } from "@vicstack/permissions";
 
 type Post = { id: string; authorID: string; body: string; createdAt: Date; locked: boolean };
-type Resources = { post: { model: Post } };
-type Permissions = PermissionsGenerator<User, typeof roles, typeof actions, Resources>;
+type Resources = { post: { model: Post; actions: typeof actions } };
+type Permissions = PermissionsGenerator<User, typeof roles, Resources>;
 
 const isOwner = (user: User, post: Post) => user.id === post.authorID;
 const isPublished = (user: User, post: Post) => !post.locked;
@@ -224,7 +228,7 @@ const permissions = {
   },
 } satisfies Permissions;
 
-const can = createCan<User, typeof roles, typeof actions, Resources, typeof permissions>(
+const can = createCan<User, typeof roles, Resources, typeof permissions>(
   permissions
 );
 
@@ -250,7 +254,7 @@ Promise-typed.
 denials:
 
 ```ts
-const can = createCan<User, typeof roles, typeof actions, Resources, typeof permissions>(
+const can = createCan<User, typeof roles, Resources, typeof permissions>(
   permissions,
   {
     logger: {

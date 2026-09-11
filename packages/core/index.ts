@@ -1,16 +1,17 @@
 // a resource entry's model type — the actual object a check function receives.
 type ModelOf<R> = R extends { model: infer M } ? M : never;
 
-// a resource entry's extra, resource-specific actions (on top of the global `Actions`
-// union) — e.g. `"publish" | "archive"` on a `post` entry that other resources don't get.
-type ExtraActionsOf<R> = R extends { actions: infer A extends string } ? A : never;
+// a resource entry's own action set — the full list of actions valid for that resource.
+// There is no library-provided "shared base actions" concept: if multiple resources share
+// a common set of actions, declare your own reusable union or const array and include it
+// in each resource's own `actions`.
+type ActionsOf<R> = R extends { actions: infer A extends readonly string[] } ? A[number] : never;
 
 export type PermissionKey<
-  Actions extends readonly string[],
-  Resources extends Record<string, { model: any; actions?: string }>,
+  Resources extends Record<string, { model: any; actions: readonly string[] }>,
 > = {
   [K in Extract<keyof Resources, string>]:
-    | `${K}:${Actions[number] | ExtraActionsOf<Resources[K]>}`
+    | `${K}:${ActionsOf<Resources[K]>}`
     | `${K}:*`;
 }[Extract<keyof Resources, string>];
 
@@ -29,16 +30,18 @@ type ResourceOf<P extends string, Resources extends Record<string, any>> =
     : never;
 
 // expands a single declared key into the concrete permission(s) it covers — a wildcard
-// key expands to every action on its resource (global actions plus that resource's own
-// extras), anything else passes through unchanged. `Key` must be a naked type parameter
-// here (not inlined) for the conditional to distribute over the union callers feed it
-// (e.g. `keyof RoleEntry & string`) — same rule this file already relies on for
-// `CheckValue` in the v2.0.0 migration.
-type Expand<Key extends string, Actions extends readonly string[], Resources extends Record<string, any>> =
+// key expands to every action declared on its own resource, anything else passes through
+// unchanged. `Key` must be a naked type parameter here (not inlined) for the conditional to
+// distribute over the union callers feed it (e.g. `keyof RoleEntry & string`) — same rule
+// this file already relies on for `CheckValue` in the v2.0.0 migration. The `Res extends
+// keyof Resources` check can't actually fail for a `Key` coming from a `PermissionsGenerator`-
+// typed table (every declared key is already constrained to a real `PermissionKey`), but is
+// kept for safety since `Expand` isn't itself scoped to that guarantee.
+type Expand<Key extends string, Resources extends Record<string, any>> =
   Key extends `${infer Res}:*`
     ? Res extends keyof Resources
-      ? `${Res}:${Actions[number] | ExtraActionsOf<Resources[Res]>}`
-      : `${Res}:${Actions[number]}`
+      ? `${Res}:${ActionsOf<Resources[Res]>}`
+      : never
     : Key;
 
 // a role entry's own permission keys, excluding the reserved `extends` field — `extends`
@@ -71,16 +74,14 @@ type DistributeAncestors<Perms, A extends keyof Perms, D extends number> =
 type EffectiveKeys<
   Perms,
   R extends keyof Perms,
-  Actions extends readonly string[],
   Resources extends Record<string, any>,
-> = DistributeEffectiveKeys<Perms, R | AncestorRoles<Perms, R>, Actions, Resources>;
+> = DistributeEffectiveKeys<Perms, R | AncestorRoles<Perms, R>, Resources>;
 
 type DistributeEffectiveKeys<
   Perms,
   Rs extends keyof Perms,
-  Actions extends readonly string[],
   Resources extends Record<string, any>,
-> = Rs extends any ? Expand<DeclaredKeys<Perms[Rs]>, Actions, Resources> : never;
+> = Rs extends any ? Expand<DeclaredKeys<Perms[Rs]>, Resources> : never;
 
 // every concrete permission askable by a user holding more than one role at once: the
 // union of each directly-held role's own `EffectiveKeys` (which already includes that
@@ -91,9 +92,8 @@ type DistributeEffectiveKeys<
 type EffectiveKeysForRoleSet<
   Perms,
   Rs extends keyof Perms,
-  Actions extends readonly string[],
   Resources extends Record<string, any>,
-> = Rs extends any ? EffectiveKeys<Perms, Rs, Actions, Resources> : never;
+> = Rs extends any ? EffectiveKeys<Perms, Rs, Resources> : never;
 
 // resolves a role's OWN check for a permission only — exact key, falling back to the
 // role's own wildcard. Does not look at ancestors. `never` if the role itself declares
@@ -224,11 +224,10 @@ export function not(check: CheckValue<unknown, unknown>) {
 export type PermissionsGenerator<
   User extends { roles: readonly Roles[number][] },
   Roles extends readonly string[],
-  Actions extends readonly string[],
-  Resources extends Record<string, { model: any; actions?: string }>,
+  Resources extends Record<string, { model: any; actions: readonly string[] }>,
 > = {
   [UR in Roles[number]]: Partial<{
-    [P in PermissionKey<Actions, Resources>]: CheckFor<P, User, Resources>;
+    [P in PermissionKey<Resources>]: CheckFor<P, User, Resources>;
   }> & {
     /** Parent roles this role inherits grants from — always an array. Later entries
      * override earlier ones on conflicting keys. This role's own keys (including its
@@ -266,10 +265,13 @@ export type CreateCanOptions<User> = {
 * specific `"resource:action"` key always overrides the wildcard for that action. A role
 * may also declare `extends: [...]` to inherit another role's (or chain of roles')
 * grants — its own keys always win over anything inherited, and when multiple parents
-* are listed, later entries override earlier ones on the same key. A `Resources` entry
-* may declare an `actions` union (alongside its required `model`) for actions specific to
-* that one resource — additive to the global `Actions` union, invisible to every other
-* resource's keys, and included in that resource's own `"resource:*"` wildcard expansion.
+* are listed, later entries override earlier ones on the same key. Each `Resources` entry
+* declares its own required `actions` list (alongside its `model`) — there is no global
+* action set shared across resources, so a resource's `"resource:*"` wildcard always
+* expands to exactly that resource's own `actions`, nothing borrowed from anywhere else.
+* If several resources share a common set of actions, define your own reusable union or
+* const array and include it in each resource's `actions` yourself; `createCan` does not
+* merge or infer shared actions on your behalf.
 * `User.roles` is always an array — a user can hold more than one role at once, and a
 * permission is grantable if ANY held role (or its `extends` ancestors) grants it:
 * most-permissive-wins, a logical OR across every held role's resolved check, not an
@@ -282,9 +284,8 @@ export type CreateCanOptions<User> = {
 export function createCan<
   User extends { roles: readonly Roles[number][] },
   Roles extends readonly string[],
-  Actions extends readonly string[],
   Resources extends Record<string, any>,
-  P extends PermissionsGenerator<User, Roles, Actions, Resources>,
+  P extends PermissionsGenerator<User, Roles, Resources>,
 >(permissions: P, options?: CreateCanOptions<User>) {
   type Check = boolean | ((user: User, resource?: unknown) => boolean | Promise<boolean>);
   type Table = Record<string, Check>;
@@ -366,7 +367,7 @@ export function createCan<
 
   return function can<
     R extends readonly Roles[number][],
-    Perm extends EffectiveKeysForRoleSet<P, R[number], Actions, Resources>,
+    Perm extends EffectiveKeysForRoleSet<P, R[number], Resources>,
   >(
     user: User & { roles: R },
     permission: Perm,

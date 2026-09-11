@@ -57,6 +57,20 @@ resource is still deliberately unimplemented.
       `PER_RESOURCE_ACTIONS.md` for the design record — shipped as "Option B" (colocated on the
       resource entry) rather than the doc's recommended "Option A" (a separate map), traded for
       keeping a resource's actions next to its model instead of a non-breaking, additive change.
+- [x] **Actions become fully per-resource (global `Actions` removed).** Follow-up to "Per-resource
+      action sets" above: that entry kept one global `Actions` union every resource got for free,
+      with per-resource entries only adding *extra* actions on top. This goes further and removes
+      the global `Actions` type parameter entirely — every `Resources` entry now declares its own
+      complete, required `actions` list, with nothing merged in from anywhere else. Gained: one
+      fewer generic argument on `PermissionsGenerator`/`createCan` at every call site, and no more
+      "global actions plus optional per-resource extras" merge logic in `PermissionKey`/`Expand` to
+      reason about. Lost: the library no longer offers any built-in "shared base actions across
+      resources" mechanism — sharing a common action set is now a user-land convention (define your
+      own `BaseActions` union or const array and reuse it in each resource's own `actions`), not
+      something `createCan` does for you. Breaking change: every existing `Resources` entry —
+      including ones that had no resource-specific extras before — must now list its own full
+      action set explicitly; no separate design doc for this one, the shape is simple enough not
+      to need one.
 - [ ] **Query/list-level filtering.** `can()` only answers "can this user touch this specific
       instance," not "what's the filter for which posts this user can see" — needed for any list
       endpoint. Likely means check functions can optionally return a query predicate, not just a
