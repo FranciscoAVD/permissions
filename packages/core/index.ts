@@ -48,25 +48,19 @@ type Expand<Key extends string, Resources extends Record<string, any>> =
 // declares parent roles, it is never itself a "resource:action" permission.
 type DeclaredKeys<RoleEntry> = Exclude<keyof RoleEntry & string, "extends">;
 
-// artificial recursion cap for walking an `extends` graph at the type level. Real
-// hierarchies are a handful of levels deep at most; this exists purely so a mistakenly
-// cyclic `extends` graph can't trip TypeScript's own recursion-depth guard (which would
-// surface as a "type instantiation is excessively deep" compile error instead of the
-// clear runtime error `createCan()` throws for cycles). Bump if a legitimate hierarchy
-// is ever deeper than this.
-type Depth = [never, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-
 // every ancestor role name reachable from `R` by following `extends` (own role not
-// included). Depth-capped: a cycle just stops contributing further ancestors once the
-// cap is hit rather than recursing forever.
-type AncestorRoles<Perms, R extends keyof Perms, D extends number = 12> = D extends 0
-  ? never
-  : Perms[R] extends { extends: readonly (infer A extends keyof Perms)[] }
-    ? A | DistributeAncestors<Perms, A, Depth[D]>
+// included). No manual recursion cap: a cyclic `extends` graph runs into TypeScript's own
+// recursion-depth guard instead, surfacing as a "type instantiation is excessively deep"
+// compile error if a role in the cycle is ever actually asked about a permission (via
+// `can()`) — `createCan()` also rejects a cycle at construction time with a clearer
+// runtime error, so a cycle is caught one way or the other before it matters.
+type AncestorRoles<Perms, R extends keyof Perms> =
+  Perms[R] extends { extends: readonly (infer A extends keyof Perms)[] }
+    ? A | DistributeAncestors<Perms, A>
     : never;
 
-type DistributeAncestors<Perms, A extends keyof Perms, D extends number> =
-  A extends any ? AncestorRoles<Perms, A, D> : never;
+type DistributeAncestors<Perms, A extends keyof Perms> =
+  A extends any ? AncestorRoles<Perms, A> : never;
 
 // every concrete permission a role can be asked about: its own declared keys (wildcards
 // expanded) unioned with every ancestor's, recursively. Order doesn't matter here — it's
@@ -121,17 +115,18 @@ type OwnResolve<RoleEntry, Perm extends string> =
 // consequence is that `ParamCount` below may treat the resource argument as optional
 // rather than required when conflicting candidates disagree on arity — an accepted
 // tradeoff, not a bug to chase away with an `as const` requirement on `extends`.
-type ResolveCheck<Perms, R extends keyof Perms, Perm extends string, D extends number = 12> =
+//
+// No manual recursion cap here either, same as `AncestorRoles` above — relies on
+// TypeScript's own recursion-depth guard for a cyclic `extends` graph.
+type ResolveCheck<Perms, R extends keyof Perms, Perm extends string> =
   OwnResolve<Perms[R], Perm> extends never
-    ? D extends 0
-      ? never
-      : Perms[R] extends { extends: readonly (infer A extends keyof Perms)[] }
-        ? DistributeResolve<Perms, A, Perm, Depth[D]>
-        : never
+    ? Perms[R] extends { extends: readonly (infer A extends keyof Perms)[] }
+      ? DistributeResolve<Perms, A, Perm>
+      : never
     : OwnResolve<Perms[R], Perm>;
 
-type DistributeResolve<Perms, A extends keyof Perms, Perm extends string, D extends number> =
-  A extends any ? ResolveCheck<Perms, A, Perm, D> : never;
+type DistributeResolve<Perms, A extends keyof Perms, Perm extends string> =
+  A extends any ? ResolveCheck<Perms, A, Perm> : never;
 
 // every resolved check across a set of directly-held roles for one concrete permission —
 // most-permissive-wins is implemented at runtime (see `evaluateAny` in `createCan`) as a
